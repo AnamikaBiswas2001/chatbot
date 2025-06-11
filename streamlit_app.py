@@ -7,6 +7,24 @@ import openai
 
 openai.api_key = st.secrets["openai"]["api_key"]
 
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+# 1. Define a simple knowledge base
+knowledge_base = {
+    "How do I upload an RFP?": "Go to the 'Upload RFP' page and choose your file (PDF or DOCX).",
+    "What is included in labor costs?": "Labor costs include wages, benefits, offshore premiums, and shift differentials.",
+    "How is the total labor cost calculated?": "Total labor cost is estimated as: Count × Duration (Days) × Daily Rate.",
+    "Where do I review extracted roles?": "Use the 'Extract Labor Roles' tab to view and edit labor requirements.",
+    "What formats are supported for upload?": "Currently supported formats are PDF and DOCX.",
+}
+
+questions = list(knowledge_base.keys())
+answers = list(knowledge_base.values())
+
+vectorizer = TfidfVectorizer()
+X = vectorizer.fit_transform(questions)
+
 # Page setup
 st.set_page_config(page_title="AI-Enhanced RFP Estimator", layout="wide")
 
@@ -15,29 +33,18 @@ page = st.sidebar.selectbox("Go to", ["Dashboard", "Upload RFP", "Extract Labor 
 
 # Chatbot Assistant (Sidebar)
 with st.sidebar:
-    st.markdown("---")
-    st.markdown("### 🤖 Assistant")
-    chatbot_prompt = st.text_input("Ask something about the RFP process:")
+    st.markdown("### 🤖 RFP Assistant (Offline AI)")
+    user_query = st.text_input("Ask something about the RFP...")
 
-    if chatbot_prompt:
-        try:
-            # Initialize OpenAI client
-            client = openai.OpenAI(api_key=st.secrets["openai"]["api_key"])
+    if user_query:
+        query_vec = vectorizer.transform([user_query])
+        similarity = cosine_similarity(query_vec, X).flatten()
+        best_match_idx = similarity.argmax()
 
-            # Send chat prompt
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are an expert assistant for oil & gas RFP labor cost estimation."},
-                    {"role": "user", "content": chatbot_prompt}
-                ]
-            )
-
-            # Show chatbot reply
-            st.write(response.choices[0].message.content)
-
-        except Exception as e:
-            st.error(f"⚠️ Chatbot error: {e}")
+        if similarity[best_match_idx] > 0.3:
+            st.success(answers[best_match_idx])
+        else:
+            st.warning("Sorry, I couldn’t find a good match. Try asking differently.")
 
 # --- Page 1: Dashboard ---
 if page == "Dashboard":
