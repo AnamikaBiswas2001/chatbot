@@ -15,24 +15,7 @@ def get_snowflake_connection():
         role=st.secrets["snowflake"]["role"]
     )
 
-def test_snowflake_connection():
-    try:
-        conn = get_snowflake_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT CURRENT_USER(), CURRENT_ROLE(), CURRENT_DATABASE(), CURRENT_SCHEMA();")
-        result = cur.fetchone()
-        st.success("✅ Snowflake connection successful!")
-        st.write("User:", result[0])
-        st.write("Role:", result[1])
-        st.write("Database:", result[2])
-        st.write("Schema:", result[3])
-        cur.close()
-    except Exception as e:
-        st.error(f"❌ Connection failed: {e}")
 
-# Call this function temporarily for testing
-if st.sidebar.button("🔌 Test Snowflake Connection"):
-    test_snowflake_connection()
 
 st.set_page_config(page_title="AI-Enhanced RFP Estimator", layout="wide")
 
