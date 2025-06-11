@@ -3,9 +3,6 @@ import pandas as pd
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
 
-import openai
-
-openai.api_key = st.secrets["openai"]["api_key"]
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
