@@ -16,26 +16,28 @@ page = st.sidebar.selectbox("Go to", ["Dashboard", "Upload RFP", "Extract Labor 
 # Chatbot Assistant (Sidebar)
 with st.sidebar:
     st.markdown("---")
-    st.markdown("### 🤖 AI Chat Assistant")
+    st.markdown("### 🤖 Assistant")
+    chatbot_prompt = st.text_input("Ask something about the RFP process:")
 
-    user_input = st.text_input("Ask anything about RFPs or labor cost:")
+    if chatbot_prompt:
+        try:
+            # Initialize OpenAI client
+            client = openai.OpenAI(api_key=st.secrets["openai"]["api_key"])
 
-    if user_input:
-        with st.spinner("Thinking..."):
-            try:
-                response = openai.ChatCompletion.create(
-                    model="gpt-3.5-turbo",  # Or "gpt-4" if you have access
-                    messages=[
-                        {"role": "system", "content": "You are an expert in oil and gas RFP proposal estimation, specializing in labor cost estimation and proposal creation."},
-                        {"role": "user", "content": user_input}
-                    ],
-                    temperature=0.4
-                )
-                answer = response['choices'][0]['message']['content']
-                st.write(answer)
+            # Send chat prompt
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are an expert assistant for oil & gas RFP labor cost estimation."},
+                    {"role": "user", "content": chatbot_prompt}
+                ]
+            )
 
-            except Exception as e:
-                st.error(f"Chatbot Error: {e}")
+            # Show chatbot reply
+            st.write(response.choices[0].message.content)
+
+        except Exception as e:
+            st.error(f"⚠️ Chatbot error: {e}")
 
 # --- Page 1: Dashboard ---
 if page == "Dashboard":
