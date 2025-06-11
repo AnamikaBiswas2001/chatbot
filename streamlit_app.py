@@ -160,7 +160,12 @@ elif page == "Estimate Labor Cost":
         total = df["total_cost"].sum()
         st.subheader(f"🧾 Estimated Total Labor Cost: ${total:,.2f}")
 
+        # Proposal Summary Button
+        st.markdown("### 📄 Proposal Summary Report")
         if st.button("📄 Generate Proposal Summary"):
+            from docx import Document
+            from io import BytesIO
+
             doc = Document()
             doc.add_heading("RFP Labor Cost Summary", 0)
             doc.add_paragraph(f"Estimated Total Labor Cost: ${total:,.2f}")
@@ -182,11 +187,12 @@ elif page == "Estimate Labor Cost":
             buffer.seek(0)
 
             st.download_button(
-                label="💾 Download Summary as DOCX",
+                label="📥 Download Summary as DOCX",
                 data=buffer,
                 file_name="rfp_summary.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             )
+
 
     except Exception as e:
         st.error(f"❌ Connection failed: {e}")
