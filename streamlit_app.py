@@ -3,6 +3,10 @@ import pandas as pd
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
 
+import openai
+
+openai.api_key = st.secrets["openai"]["api_key"]
+
 # Page setup
 st.set_page_config(page_title="AI-Enhanced RFP Estimator", layout="wide")
 
@@ -12,15 +16,26 @@ page = st.sidebar.selectbox("Go to", ["Dashboard", "Upload RFP", "Extract Labor 
 # Chatbot Assistant (Sidebar)
 with st.sidebar:
     st.markdown("---")
-    st.markdown("### 🤖 Assistant")
-    chatbot_prompt = st.text_input("Ask about RFP or labor cost:")
-    if chatbot_prompt:
-        if "labor" in chatbot_prompt.lower():
-            st.write("Labor costs typically include wages, benefits, offshore premiums, and shift differentials.")
-        elif "upload" in chatbot_prompt.lower():
-            st.write("To upload an RFP, go to 'Upload RFP' and select a document.")
-        else:
-            st.write("I'm still learning! Ask about uploading or estimating labor roles.")
+    st.markdown("### 🤖 AI Chat Assistant")
+
+    user_input = st.text_input("Ask anything about RFPs or labor cost:")
+
+    if user_input:
+        with st.spinner("Thinking..."):
+            try:
+                response = openai.ChatCompletion.create(
+                    model="gpt-3.5-turbo",  # Or "gpt-4" if you have access
+                    messages=[
+                        {"role": "system", "content": "You are an expert in oil and gas RFP proposal estimation, specializing in labor cost estimation and proposal creation."},
+                        {"role": "user", "content": user_input}
+                    ],
+                    temperature=0.4
+                )
+                answer = response['choices'][0]['message']['content']
+                st.write(answer)
+
+            except Exception as e:
+                st.error(f"Chatbot Error: {e}")
 
 # --- Page 1: Dashboard ---
 if page == "Dashboard":
