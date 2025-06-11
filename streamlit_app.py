@@ -82,14 +82,7 @@ elif page == "Extract Labor Roles":
     st.markdown("Review and edit the extracted labor roles.")
 
     # Sample editable table (replace with data from Snowflake later)
-    sample_roles = pd.DataFrame({
-        "role": ["Drilling Engineer", "Rig Worker", "Safety Officer"],
-        "count": [3, 20, 2],
-        "duration_days": [30, 45, 30],
-        "daily_rate": [1000, 500, 700],
-        "notes": ["12-hr shifts", "2 teams rotating", "Offshore only"]
-    })
-
+    
     edited_roles = st.data_editor(sample_roles, num_rows="dynamic", use_container_width=True)
 
     if st.button("💾 Save to Snowflake"):
