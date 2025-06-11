@@ -3,6 +3,8 @@ import pandas as pd
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
 import difflib
+from docx import Document
+from io import BytesIO
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -28,13 +30,9 @@ def load_faq_from_snowflake():
         st.error(f"Failed to load chatbot Q&A: {e}")
         return pd.DataFrame(columns=["question", "answer"])
 
-# Page setup
 st.set_page_config(page_title="AI-Enhanced RFP Estimator", layout="wide")
-
-# Sidebar Navigation
 page = st.sidebar.selectbox("Go to", ["Dashboard", "Upload RFP", "Extract Labor Roles", "Estimate Labor Cost"])
 
-# Chatbot Assistant (Sidebar)
 faq_df = load_faq_from_snowflake()
 
 def get_best_match(user_input):
@@ -51,12 +49,10 @@ with st.sidebar:
     if query:
         st.write(get_best_match(query))
 
-# --- Page 1: Dashboard ---
 if page == "Dashboard":
     st.title("📊 AI-Enhanced RFP Estimator - Labor Cost Focus")
     st.header("🔍 Recent Activity")
 
-    # Example data (replace with dynamic later)
     recent_activity = pd.DataFrame({
         "RFP Name": ["Project Alpha", "Deep Sea X", "Ocean Drill"],
         "Uploaded Date": ["2025-06-01", "2025-05-28", "2025-05-20"],
@@ -74,7 +70,6 @@ if page == "Dashboard":
         if st.button("📄 View Past Estimates"):
             st.info("Coming soon: Historical analysis and accuracy dashboards.")
 
-# --- Page 2: Upload RFP ---
 elif page == "Upload RFP":
     st.title("📁 Upload New RFP Document")
     st.markdown("Use this page to upload an RFP document and extract labor-related data.")
@@ -90,7 +85,6 @@ elif page == "Upload RFP":
             st.success("RFP uploaded successfully. Labor extraction process started.")
             st.info("(This would trigger Snowflake NLP pipelines and populate labor roles.)")
 
-# --- Page 3: Extract Labor Roles ---
 elif page == "Extract Labor Roles":
     st.title("🛠 Extracted Labor Roles")
     st.markdown("Review and edit the extracted labor roles.")
@@ -105,10 +99,8 @@ elif page == "Extract Labor Roles":
             schema=st.secrets["snowflake"]["schema"],
             role=st.secrets["snowflake"]["role"]
         )
-
         df_existing = pd.read_sql("SELECT * FROM EXTRACTED_LABOR_ROLES", conn)
         df_existing.columns = [col.lower() for col in df_existing.columns]
-
     except:
         df_existing = pd.DataFrame({
             "role": ["Drilling Engineer", "Rig Worker", "Safety Officer"],
@@ -120,7 +112,7 @@ elif page == "Extract Labor Roles":
 
     edited_roles = st.data_editor(df_existing, num_rows="dynamic", use_container_width=True)
 
-    if st.button("💾 Save to Snowflake"):
+    if st.button("📅 Save to Snowflake"):
         try:
             conn = snowflake.connector.connect(
                 user=st.secrets["snowflake"]["user"],
@@ -131,9 +123,8 @@ elif page == "Extract Labor Roles":
                 schema=st.secrets["snowflake"]["schema"],
                 role=st.secrets["snowflake"]["role"]
             )
-
             edited_roles.columns = [c.upper() for c in edited_roles.columns]
-            st.write("📤 Saving the following data to Snowflake:")
+            st.write("📄 Saving the following data to Snowflake:")
             st.dataframe(edited_roles)
 
             success, nchunks, nrows, _ = write_pandas(conn, edited_roles, table_name="EXTRACTED_LABOR_ROLES", overwrite=True)
@@ -146,7 +137,6 @@ elif page == "Extract Labor Roles":
         except Exception as e:
             st.exception(f"Snowflake Write Error: {e}")
 
-# --- Page 4: Estimate Labor Cost ---
 elif page == "Estimate Labor Cost":
     st.title("💰 Labor Cost Estimation")
     st.markdown("Automatically estimate labor cost based on roles stored in Snowflake.")
@@ -161,7 +151,6 @@ elif page == "Estimate Labor Cost":
             schema=st.secrets["snowflake"]["schema"],
             role=st.secrets["snowflake"]["role"]
         )
-
         df = pd.read_sql("SELECT * FROM EXTRACTED_LABOR_ROLES", conn)
         df.columns = [col.lower() for col in df.columns]
         df["total_cost"] = df["count"] * df["duration_days"] * df["daily_rate"]
@@ -170,6 +159,34 @@ elif page == "Estimate Labor Cost":
 
         total = df["total_cost"].sum()
         st.subheader(f"🧾 Estimated Total Labor Cost: ${total:,.2f}")
+
+        if st.button("📄 Generate Proposal Summary"):
+            doc = Document()
+            doc.add_heading("RFP Labor Cost Summary", 0)
+            doc.add_paragraph(f"Estimated Total Labor Cost: ${total:,.2f}")
+            doc.add_paragraph("\nDetailed Breakdown:")
+
+            table = doc.add_table(rows=1, cols=len(df.columns))
+            table.style = 'Table Grid'
+            hdr_cells = table.rows[0].cells
+            for i, col in enumerate(df.columns):
+                hdr_cells[i].text = col.capitalize()
+
+            for _, row in df.iterrows():
+                row_cells = table.add_row().cells
+                for i, val in enumerate(row):
+                    row_cells[i].text = str(val)
+
+            buffer = BytesIO()
+            doc.save(buffer)
+            buffer.seek(0)
+
+            st.download_button(
+                label="💾 Download Summary as DOCX",
+                data=buffer,
+                file_name="rfp_summary.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
 
     except Exception as e:
         st.error(f"❌ Connection failed: {e}")
