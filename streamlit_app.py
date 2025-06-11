@@ -122,17 +122,18 @@ elif page == "Estimate Labor Cost":
             schema=st.secrets["snowflake"]["schema"],
             role=st.secrets["snowflake"]["role"]
         )
-        query = "SELECT * FROM extracted_labor_roles"
-        df = pd.read_sql(query, conn)
 
-        if not df.empty:
-            df["Total Cost"] = df["count"] * df["duration_days"] * df["daily_rate"]
-            st.dataframe(df, use_container_width=True)
+        df = pd.read_sql("SELECT * FROM EXTRACTED_LABOR_ROLES", conn)
 
-            total = df["Total Cost"].sum()
-            st.subheader(f"🧾 Estimated Total Labor Cost: ${total:,.2f}")
-        else:
-            st.warning("No labor roles found. Please upload and save roles first.")
+        # Standardize column names
+        df.columns = [col.lower() for col in df.columns]
+
+        df["total_cost"] = df["count"] * df["duration_days"] * df["daily_rate"]
+
+        st.dataframe(df)
+
+        total = df["total_cost"].sum()
+        st.subheader(f"🧾 Estimated Total Labor Cost: ${total:,.2f}")
 
     except Exception as e:
         st.error(f"❌ Connection failed: {e}")
