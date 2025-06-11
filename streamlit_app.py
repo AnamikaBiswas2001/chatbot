@@ -83,11 +83,11 @@ elif page == "Extract Labor Roles":
 
     # Sample editable table (replace with data from Snowflake later)
     sample_roles = pd.DataFrame({
-        "role": [],
-        "count": [],
-        "duration_days": [],
-        "daily_rate": [],
-        "notes": []
+        "role": ["Drilling Engineer", "Rig Worker", "Safety Officer"],
+        "count": [3, 20, 2],
+        "duration_days": [30, 45, 30],
+        "daily_rate": [1000, 500, 700],
+        "notes": ["12-hr shifts", "2 teams rotating", "Offshore only"]
     })
 
     edited_roles = st.data_editor(sample_roles, num_rows="dynamic", use_container_width=True)
