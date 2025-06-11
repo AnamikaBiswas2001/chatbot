@@ -88,10 +88,24 @@ elif page == "Extract Labor Roles":
                 schema=st.secrets["snowflake"]["schema"],
                 role=st.secrets["snowflake"]["role"]
             )
-            write_pandas(conn, edited_roles, table_name="extracted_labor_roles", overwrite=True)
-            st.success("Labor roles saved to Snowflake.")
+
+            # Uppercase column names to match Snowflake convention
+            edited_roles.columns = [c.upper() for c in edited_roles.columns]
+
+            st.write("📤 Saving the following data to Snowflake:")
+            st.dataframe(edited_roles)
+
+            # Save
+            success, nchunks, nrows, _ = write_pandas(conn, edited_roles, table_name="EXTRACTED_LABOR_ROLES", overwrite=True)
+
+            if success:
+                st.success(f"✅ Saved {nrows} rows in {nchunks} chunk(s) to Snowflake.")
+            else:
+                st.error("❌ Failed to save data.")
+
         except Exception as e:
-            st.error(f"❌ Error saving to Snowflake: {e}")
+            st.exception(f"Snowflake Write Error: {e}")
+
 
 # --- Page 4: Estimate Labor Cost ---
 elif page == "Estimate Labor Cost":
