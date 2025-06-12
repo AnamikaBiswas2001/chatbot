@@ -9,10 +9,9 @@ import re
 from collections import Counter
 
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.metrics.pairwise import cosine_similarity 
 
 page = st.sidebar.selectbox("Go to", ["Dashboard", "Upload RFP", "Extract Labor Roles", "Estimate Labor Cost"])
-
 # ----------------------- Helper Functions ---------------------------
 def extract_text_from_docx(file):
     doc = Document(file)
@@ -41,7 +40,7 @@ def load_faq_from_snowflake():
 
 def extract_roles_from_structured_blocks(text):
     pattern = re.compile(
-        r"(?P<role>[A-Za-z ]+?)\\s*-\\s*Count:\\s*(?P<count>\\d+)\\s*-\\s*Duration:\\s*(?P<duration>\\d+)\\s*Days\\s*-\\s*Daily Rate:\\s*\\$(?P<rate>\\d+)",
+        r"(?P<role>[A-Za-z ]+?)\s*-\s*Count:\s*(?P<count>\d+)\s*-\s*Duration:\s*(?P<duration>\d+)\s*Days\s*-\s*Daily Rate:\s*\$(?P<rate>\d+)",
         re.IGNORECASE
     )
     matches = pattern.findall(text)
@@ -55,7 +54,6 @@ def extract_roles_from_structured_blocks(text):
             "notes": ""
         })
     return roles
-
 
 def suggest_roles_from_project(text):
     text = text.lower()
@@ -74,7 +72,7 @@ def suggest_roles_from_project(text):
         return [
             {"role": "Production Engineer", "count": 2, "duration_days": 30, "daily_rate": 1000, "notes": ""},
             {"role": "Operator", "count": 3, "duration_days": 30, "daily_rate": 700, "notes": ""}
-        ]       
+        ]
     return []
 
 def extract_proposal_requirements(text):
@@ -93,9 +91,18 @@ def answer_proposal_question(req, faq_df):
     else:
         return "This requirement will be addressed in the final submission per project scope."
 
-# ----------------------- Sidebar Assistant ---------------------------
+# ----------------------- Streamlit UI ---------------------------
+st.set_page_config(page_title="AI-Enhanced RFP Estimator", layout="wide")
+faq_df = load_faq_from_snowflake()
+page = st.sidebar.selectbox("Go to", ["Dashboard", "Upload RFP", "Extract Labor Roles", "Estimate Labor Cost"])
+
+# ----------------------- Sidebar Assistant Chat ---------------------------
 with st.sidebar:
     st.markdown("### 🤖 Assistant")
+    user_query = st.text_input("Ask something about the RFP process:")
+    if user_query:
+        st.write(answer_proposal_question(user_query, faq_df))
+
     uploaded_chat_file = st.file_uploader("Upload RFP to get summary", type=["docx"])
 
     if uploaded_chat_file:
@@ -109,11 +116,8 @@ with st.sidebar:
             if not roles_data:
                 roles_data = suggest_roles_from_project(extracted_text)
                 st.info("⚠️ Roles were inferred based on project scope.")
-                proposal_reqs = extract_proposal_requirements(extracted_text)
 
-            if not roles_data:
-                roles_data = suggest_roles_from_project(extracted_text)
-                st.info("Roles were inferred based on project scope.")
+            proposal_reqs = extract_proposal_requirements(extracted_text)
 
             if roles_data:
                 df_roles = pd.DataFrame(roles_data)
@@ -158,7 +162,7 @@ with st.sidebar:
                     doc.add_heading("Responses to Proposal Requirements", level=1)
                     for req in proposal_reqs:
                         doc.add_paragraph(f"• {req}", style='List Bullet')
-                        doc.add_paragraph(answer_proposal_question(req, load_faq_from_snowflake()), style='Intense Quote')
+                        doc.add_paragraph(answer_proposal_question(req, faq_df), style='Intense Quote')
 
                 buffer = BytesIO()
                 doc.save(buffer)
@@ -171,6 +175,7 @@ with st.sidebar:
                     file_name="proposal_summary.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
+
 
 # ----------------------- Dashboard ---------------------------
 if page == "Dashboard":
