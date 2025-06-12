@@ -1,4 +1,7 @@
 import streamlit as st
+
+st.set_page_config(page_title="AI-Enhanced RFP Estimator", layout="wide")
+
 import pandas as pd
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
@@ -11,8 +14,6 @@ from collections import Counter
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# ✅ This must be the first Streamlit command
-st.set_page_config(page_title="AI-Enhanced RFP Estimator", layout="wide")
 
 # ----------------------- Helper Functions ---------------------------
 def extract_text_from_docx(file):
