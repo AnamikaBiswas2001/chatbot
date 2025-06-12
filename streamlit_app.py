@@ -11,6 +11,7 @@ from collections import Counter
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+# ----------------------- Helper Functions ---------------------------
 def extract_text_from_docx(file):
     doc = Document(file)
     return "\n".join([para.text for para in doc.paragraphs])
@@ -55,6 +56,26 @@ def extract_roles_with_counts(text):
         })
     return extracted
 
+def suggest_roles_from_project(text):
+    text = text.lower()
+    if "offshore" in text and "drilling" in text:
+        return [
+            {"role": "Drilling Engineer", "count": 2, "duration_days": 45, "daily_rate": 1200, "notes": ""},
+            {"role": "Rig Worker", "count": 10, "duration_days": 45, "daily_rate": 500, "notes": ""},
+            {"role": "Safety Officer", "count": 1, "duration_days": 30, "daily_rate": 800, "notes": ""}
+        ]
+    elif "maintenance" in text:
+        return [
+            {"role": "Technician", "count": 5, "duration_days": 20, "daily_rate": 600, "notes": ""},
+            {"role": "Supervisor", "count": 1, "duration_days": 20, "daily_rate": 900, "notes": ""}
+        ]
+    elif "production" in text:
+        return [
+            {"role": "Production Engineer", "count": 2, "duration_days": 30, "daily_rate": 1000, "notes": ""},
+            {"role": "Operator", "count": 3, "duration_days": 30, "daily_rate": 700, "notes": ""}
+        ]
+    return []
+
 def extract_proposal_requirements(text):
     match = re.search(r"Proposal Requirements:\s*(.*?)\s*(Submission Deadline:|Contact for Clarifications:|$)", text, re.DOTALL | re.IGNORECASE)
     if match:
@@ -70,19 +91,6 @@ def answer_proposal_question(req, faq_df):
         return faq_df.loc[faq_df['question'].str.lower() == match, 'answer'].values[0]
     else:
         return "This requirement will be addressed in the final submission per project scope."
-
-# ----------------------- Streamlit UI ---------------------------
-st.set_page_config(page_title="AI-Enhanced RFP Estimator", layout="wide")
-page = st.sidebar.selectbox("Go to", ["Dashboard", "Upload RFP", "Extract Labor Roles", "Estimate Labor Cost"])
-faq_df = load_faq_from_snowflake()
-
-def get_best_match(user_input):
-    questions = faq_df["question"].tolist()
-    matches = difflib.get_close_matches(user_input.lower(), questions, n=1, cutoff=0.4)
-    if matches:
-        answer = faq_df.loc[faq_df["question"] == matches[0], "answer"].values[0]
-        return answer
-    return "I'm sorry, I don't understand that yet."
 
 # ----------------------- Sidebar Assistant ---------------------------
 with st.sidebar:
@@ -100,32 +108,53 @@ with st.sidebar:
             proposal_reqs = extract_proposal_requirements(extracted_text)
 
             if not roles_data:
-                st.warning("No labor roles found in the document.")
-            else:
+                roles_data = suggest_roles_from_project(extracted_text)
+                st.info("Roles were inferred based on project scope.")
+
+            if roles_data:
                 df_roles = pd.DataFrame(roles_data)
+                df_roles["total_cost"] = df_roles["count"] * df_roles["duration_days"] * df_roles["daily_rate"]
 
                 doc = Document()
                 doc.add_heading("Proposal Summary", 0)
-                doc.add_paragraph("Below is a summary of labor requirements based on the uploaded RFP document:\n")
 
-                table = doc.add_table(rows=1, cols=3)
-                table.style = 'Table Grid'
-                hdr_cells = table.rows[0].cells
+                doc.add_paragraph("Labor Requirements:")
+                table1 = doc.add_table(rows=1, cols=3)
+                table1.style = 'Table Grid'
+                hdr_cells = table1.rows[0].cells
                 hdr_cells[0].text = 'Role'
                 hdr_cells[1].text = 'Count'
                 hdr_cells[2].text = 'Duration (Days)'
-
                 for _, row in df_roles.iterrows():
-                    cells = table.add_row().cells
+                    cells = table1.add_row().cells
                     cells[0].text = row["role"]
                     cells[1].text = str(row["count"])
                     cells[2].text = str(row["duration_days"])
+
+                doc.add_heading("Labor Cost Estimation", level=1)
+                table2 = doc.add_table(rows=1, cols=5)
+                table2.style = 'Table Grid'
+                hdr = table2.rows[0].cells
+                hdr[0].text = 'Role'
+                hdr[1].text = 'Count'
+                hdr[2].text = 'Duration'
+                hdr[3].text = 'Rate'
+                hdr[4].text = 'Total Cost'
+                for _, row in df_roles.iterrows():
+                    row_cells = table2.add_row().cells
+                    row_cells[0].text = row["role"]
+                    row_cells[1].text = str(row["count"])
+                    row_cells[2].text = str(row["duration_days"])
+                    row_cells[3].text = f"${row['daily_rate']}"
+                    row_cells[4].text = f"${row['total_cost']:,.2f}"
+
+                doc.add_paragraph(f"\nEstimated Total Labor Cost: ${df_roles['total_cost'].sum():,.2f}")
 
                 if proposal_reqs:
                     doc.add_heading("Responses to Proposal Requirements", level=1)
                     for req in proposal_reqs:
                         doc.add_paragraph(f"• {req}", style='List Bullet')
-                        doc.add_paragraph(answer_proposal_question(req, faq_df), style='Intense Quote')
+                        doc.add_paragraph(answer_proposal_question(req, load_faq_from_snowflake()), style='Intense Quote')
 
                 buffer = BytesIO()
                 doc.save(buffer)
@@ -138,7 +167,6 @@ with st.sidebar:
                     file_name="proposal_summary.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
-
 
 # ----------------------- Dashboard ---------------------------
 if page == "Dashboard":
