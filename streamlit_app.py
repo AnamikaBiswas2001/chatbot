@@ -11,6 +11,8 @@ from collections import Counter
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+page = st.sidebar.selectbox("Go to", ["Dashboard", "Upload RFP", "Extract Labor Roles", "Estimate Labor Cost"])
+
 # ----------------------- Helper Functions ---------------------------
 def extract_text_from_docx(file):
     doc = Document(file)
