@@ -10,6 +10,15 @@ from io import BytesIO
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+
+def extract_text_from_docx(file):
+    doc = Document(file)
+    full_text = []
+    for para in doc.paragraphs:
+        full_text.append(para.text)
+    return "\n".join(full_text)
+
+
 @st.cache_data(ttl=600)
 def load_faq_from_snowflake():
     try:
@@ -81,38 +90,36 @@ def generate_response_doc(df):
 
 
 with st.sidebar:
-    st.markdown("### 🤖 Assistant (Upload RFP)")
-    uploaded_chat_file = st.file_uploader("Upload RFP file (PDF/DOCX)", type=["pdf", "docx"], key="sidebar_upload")
-
+    st.markdown("### 🤖 Assistant")
+    uploaded_chat_file = st.file_uploader("Upload RFP to get summary", type=["docx"])
+    
     if uploaded_chat_file:
-        st.success("File uploaded successfully.")
+        extracted_text = extract_text_from_docx(uploaded_chat_file)
+        
+        # Display extracted content (optional)
+        with st.expander("📝 Extracted RFP Content"):
+            st.text_area("Text Preview", extracted_text, height=300)
 
-        # Extract text
-        if uploaded_chat_file.name.endswith(".pdf"):
-            text = extract_text_from_pdf(uploaded_chat_file)
-        else:
-            text = extract_text_from_docx(uploaded_chat_file)
+        if st.button("📄 Generate Proposal Summary"):
+            # Basic labor role keyword extraction logic (you can replace with NLP later)
+            import re
+            roles = re.findall(r"\b(?:Engineer|Technician|Manager|Operator|Supervisor|Welder|Electrician|Inspector)\b", extracted_text, re.IGNORECASE)
+            roles_count = {role: roles.count(role) for role in set(roles)}
 
-        # Extract labor info
-        labor_df = extract_labor_info(text)
+            # Create Word summary
+            summary_doc = Document()
+            summary_doc.add_heading("Proposal Summary", 0)
+            summary_doc.add_paragraph("Below is a summary of labor requirements based on the uploaded RFP document:\n")
 
-        if labor_df.empty:
-            st.warning("No labor-related info found.")
-        else:
-            st.write("📋 Extracted Labor Roles:")
-            st.dataframe(labor_df)
+            for role, count in roles_count.items():
+                summary_doc.add_paragraph(f"{role.title()}: {count} needed")
 
-            # Generate and download response
-            if st.button("📄 Generate Proposal Summary"):
-                proposal = generate_response_doc(labor_df)
+            # Save to file
+            output_path = "/mnt/data/proposal_summary.docx"
+            summary_doc.save(output_path)
+            st.success("✅ Summary document generated.")
+            st.download_button("⬇️ Download Proposal Summary", data=open(output_path, "rb"), file_name="proposal_summary.docx")
 
-                # Offer download
-                st.download_button(
-                    label="⬇️ Download Proposal Document",
-                    data=proposal,
-                    file_name="Proposal_Summary.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
 
 
 if page == "Dashboard":
