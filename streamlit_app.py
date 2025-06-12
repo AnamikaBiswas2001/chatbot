@@ -37,24 +37,23 @@ def load_faq_from_snowflake():
         st.error(f"Failed to load chatbot Q&A: {e}")
         return pd.DataFrame(columns=["question", "answer"])
 
-def extract_roles_with_counts(text):
+def extract_roles_from_structured_blocks(text):
     pattern = re.compile(
-        r"(?P<count>\d+)?\s*(?P<role>(?:Drilling|Rig|Production|Safety|Maintenance)?\s?(Engineer|Technician|Manager|Operator|Supervisor|Welder|Electrician|Inspector)s?)\s*(for\s(?P<duration>\d+)\s*days)?",
+        r"(?P<role>[A-Za-z ]+?)\\s*-\\s*Count:\\s*(?P<count>\\d+)\\s*-\\s*Duration:\\s*(?P<duration>\\d+)\\s*Days\\s*-\\s*Daily Rate:\\s*\\$(?P<rate>\\d+)",
         re.IGNORECASE
     )
-    extracted = []
-    for match in pattern.finditer(text):
-        role = match.group("role").strip().title()
-        count = int(match.group("count")) if match.group("count") else 1
-        duration = int(match.group("duration")) if match.group("duration") else 30
-        extracted.append({
-            "role": role,
-            "count": count,
-            "duration_days": duration,
-            "daily_rate": 1000,
+    matches = pattern.findall(text)
+    roles = []
+    for role, count, duration, rate in matches:
+        roles.append({
+            "role": role.strip(),
+            "count": int(count),
+            "duration_days": int(duration),
+            "daily_rate": int(rate),
             "notes": ""
         })
-    return extracted
+    return roles
+
 
 def suggest_roles_from_project(text):
     text = text.lower()
@@ -73,7 +72,7 @@ def suggest_roles_from_project(text):
         return [
             {"role": "Production Engineer", "count": 2, "duration_days": 30, "daily_rate": 1000, "notes": ""},
             {"role": "Operator", "count": 3, "duration_days": 30, "daily_rate": 700, "notes": ""}
-        ]
+        ]       
     return []
 
 def extract_proposal_requirements(text):
@@ -104,8 +103,11 @@ with st.sidebar:
             st.text_area("Text Preview", extracted_text, height=300)
 
         if st.button("📄 Generate Proposal Summary"):
-            roles_data = extract_roles_with_counts(extracted_text)
-            proposal_reqs = extract_proposal_requirements(extracted_text)
+            roles_data = extract_roles_from_structured_blocks(extracted_text)
+            if not roles_data:
+                roles_data = suggest_roles_from_project(extracted_text)
+                st.info("⚠️ Roles were inferred based on project scope.")
+                proposal_reqs = extract_proposal_requirements(extracted_text)
 
             if not roles_data:
                 roles_data = suggest_roles_from_project(extracted_text)
