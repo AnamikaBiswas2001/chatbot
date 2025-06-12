@@ -66,28 +66,33 @@ with st.sidebar:
             st.text_area("Text Preview", extracted_text, height=300)
 
         if st.button("📄 Generate Proposal Summary"):
-            role_pattern = r"\b(?:Drilling|Rig|Production|Safety|Maintenance)?\s?(Engineer|Technician|Manager|Operator|Supervisor|Welder|Electrician|Inspector)\b"
-            roles = re.findall(role_pattern, extracted_text, re.IGNORECASE)
-            role_counts = dict(Counter([role.title() for role in roles]))
+    # Match full role like "Production Manager", "Safety Engineer"
+    role_pattern = r"\b(?:Drilling|Rig|Production|Safety|Maintenance)?\s?(?:Engineer|Technician|Manager|Operator|Supervisor|Welder|Electrician|Inspector)\b"
+    full_roles = re.findall(role_pattern, extracted_text, re.IGNORECASE)
+    full_roles = [role.strip().title() for role in full_roles if role.strip()]
+    role_counts = dict(Counter(full_roles))
 
-            summary_doc = Document()
-            summary_doc.add_heading("Proposal Summary", 0)
-            summary_doc.add_paragraph("Below is a summary of labor requirements based on the uploaded RFP document:\n")
+    if not role_counts:
+        st.warning("No labor roles found in the document.")
+    else:
+        summary_doc = Document()
+        summary_doc.add_heading("Proposal Summary", 0)
+        summary_doc.add_paragraph("Below is a summary of labor requirements based on the uploaded RFP document:\n")
 
-            for role, count in role_counts.items():
-                summary_doc.add_paragraph(f"{role}: {count} needed")
+        for role, count in role_counts.items():
+            summary_doc.add_paragraph(f"{role}: {count} needed")
 
-            buffer = BytesIO()
-            summary_doc.save(buffer)
-            buffer.seek(0)
+        buffer = BytesIO()
+        summary_doc.save(buffer)
+        buffer.seek(0)
 
-            st.success("✅ Summary document generated.")
-            st.download_button(
-                label="⬇️ Download Proposal Summary",
-                data=buffer,
-                file_name="proposal_summary.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
+        st.success("✅ Summary document generated.")
+        st.download_button(
+            label="⬇️ Download Proposal Summary",
+            data=buffer,
+            file_name="proposal_summary.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
 
 
 # Dashboard Page
