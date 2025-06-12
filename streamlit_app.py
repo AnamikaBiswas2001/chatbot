@@ -3,10 +3,10 @@ import pandas as pd
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
 import difflib
-import io
 from docx import Document
 from io import BytesIO
-
+import re
+from collections import Counter
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -14,10 +14,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 def extract_text_from_docx(file):
     doc = Document(file)
-    full_text = []
-    for para in doc.paragraphs:
-        full_text.append(para.text)
-    return "\n".join(full_text)
+    return "\n".join([para.text for para in doc.paragraphs])
 
 
 @st.cache_data(ttl=600)
@@ -41,10 +38,12 @@ def load_faq_from_snowflake():
         st.error(f"Failed to load chatbot Q&A: {e}")
         return pd.DataFrame(columns=["question", "answer"])
 
+
 st.set_page_config(page_title="AI-Enhanced RFP Estimator", layout="wide")
 page = st.sidebar.selectbox("Go to", ["Dashboard", "Upload RFP", "Extract Labor Roles", "Estimate Labor Cost"])
 
 faq_df = load_faq_from_snowflake()
+
 
 def get_best_match(user_input):
     questions = faq_df["question"].tolist()
@@ -55,69 +54,30 @@ def get_best_match(user_input):
     return "I'm sorry, I don't understand that yet."
 
 
-
-def generate_response_doc(df):
-    doc = Document()
-    doc.add_heading("Proposal Summary", 0)
-
-    doc.add_paragraph("Thank you for the opportunity to submit our response for labor provisioning. Below is the breakdown of required roles:")
-
-    table = doc.add_table(rows=1, cols=5)
-    table.style = 'Table Grid'
-    hdr_cells = table.rows[0].cells
-    hdr_cells[0].text = 'Role'
-    hdr_cells[1].text = 'Count'
-    hdr_cells[2].text = 'Duration (Days)'
-    hdr_cells[3].text = 'Daily Rate'
-    hdr_cells[4].text = 'Notes'
-
-    for _, row in df.iterrows():
-        cells = table.add_row().cells
-        cells[0].text = str(row["role"])
-        cells[1].text = str(row.get("count", 1))
-        cells[2].text = str(row["duration_days"])
-        cells[3].text = f"${row['daily_rate']}"
-        cells[4].text = row.get("notes", "")
-
-    doc.add_paragraph()
-    total_cost = (df["count"] * df["duration_days"] * df["daily_rate"]).sum()
-    doc.add_paragraph(f"**Estimated Total Labor Cost:** ${total_cost:,.2f}")
-
-    # Save to buffer
-    buffer = BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
-    return buffer
-
-
+# Assistant Sidebar Upload + Summary Generator
 with st.sidebar:
     st.markdown("### 🤖 Assistant")
     uploaded_chat_file = st.file_uploader("Upload RFP to get summary", type=["docx"])
-    
+
     if uploaded_chat_file:
         extracted_text = extract_text_from_docx(uploaded_chat_file)
-        
-        # Display extracted content (optional)
+
         with st.expander("📝 Extracted RFP Content"):
             st.text_area("Text Preview", extracted_text, height=300)
 
         if st.button("📄 Generate Proposal Summary"):
-            import re
+            role_pattern = r"\b(?:Drilling|Rig|Production|Safety|Maintenance)?\s?(Engineer|Technician|Manager|Operator|Supervisor|Welder|Electrician|Inspector)\b"
+            roles = re.findall(role_pattern, extracted_text, re.IGNORECASE)
+            role_counts = dict(Counter([role.title() for role in roles]))
 
-            # Extract labor roles using simple pattern matching
-            roles = re.findall(r"\b(?:Engineer|Technician|Manager|Operator|Supervisor|Welder|Electrician|Inspector)\b", extracted_text, re.IGNORECASE)
-            roles_count = {role: roles.count(role) for role in set(roles)}
-
-            # Create a Word document in memory
             summary_doc = Document()
             summary_doc.add_heading("Proposal Summary", 0)
             summary_doc.add_paragraph("Below is a summary of labor requirements based on the uploaded RFP document:\n")
 
-            for role, count in roles_count.items():
-                summary_doc.add_paragraph(f"{role.title()}: {count} needed")
+            for role, count in role_counts.items():
+                summary_doc.add_paragraph(f"{role}: {count} needed")
 
-            # Save the document to an in-memory buffer
-            buffer = io.BytesIO()
+            buffer = BytesIO()
             summary_doc.save(buffer)
             buffer.seek(0)
 
@@ -130,6 +90,7 @@ with st.sidebar:
             )
 
 
+# Dashboard Page
 if page == "Dashboard":
     st.title("📊 AI-Enhanced RFP Estimator - Labor Cost Focus")
     st.header("🔍 Recent Activity")
@@ -151,6 +112,8 @@ if page == "Dashboard":
         if st.button("📄 View Past Estimates"):
             st.info("Coming soon: Historical analysis and accuracy dashboards.")
 
+
+# Upload RFP Page
 elif page == "Upload RFP":
     st.title("📁 Upload New RFP Document")
     st.markdown("Use this page to upload an RFP document and extract labor-related data.")
@@ -166,6 +129,8 @@ elif page == "Upload RFP":
             st.success("RFP uploaded successfully. Labor extraction process started.")
             st.info("(This would trigger Snowflake NLP pipelines and populate labor roles.)")
 
+
+# Extract Labor Roles Page
 elif page == "Extract Labor Roles":
     st.title("🛠 Extracted Labor Roles")
     st.markdown("Review and edit the extracted labor roles.")
@@ -218,6 +183,8 @@ elif page == "Extract Labor Roles":
         except Exception as e:
             st.exception(f"Snowflake Write Error: {e}")
 
+
+# Estimate Labor Cost Page
 elif page == "Estimate Labor Cost":
     st.title("💰 Labor Cost Estimation")
     st.markdown("Automatically estimate labor cost based on roles stored in Snowflake.")
@@ -241,12 +208,8 @@ elif page == "Estimate Labor Cost":
         total = df["total_cost"].sum()
         st.subheader(f"🧾 Estimated Total Labor Cost: ${total:,.2f}")
 
-        # Proposal Summary Button
         st.markdown("### 📄 Proposal Summary Report")
         if st.button("📄 Generate Proposal Summary"):
-            from docx import Document
-            from io import BytesIO
-
             doc = Document()
             doc.add_heading("RFP Labor Cost Summary", 0)
             doc.add_paragraph(f"Estimated Total Labor Cost: ${total:,.2f}")
@@ -273,7 +236,6 @@ elif page == "Estimate Labor Cost":
                 file_name="rfp_summary.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             )
-
 
     except Exception as e:
         st.error(f"❌ Connection failed: {e}")
