@@ -61,14 +61,13 @@ def fetch_roles_for_task_from_snowflake(user_input):
         cursor.execute("SELECT DISTINCT task_keyword FROM standard_task_roles")
         all_keywords = [row[0] for row in cursor.fetchall()]
 
-        # Match only if keyword is found in user input
         matched_keyword = extract_task_keywords(user_input, all_keywords)
 
         if not matched_keyword:
             return None
 
         query = f"""
-            SELECT role, "count", duration_days, daily_rate
+            SELECT role, \"count\", duration_days, daily_rate
             FROM standard_task_roles
             WHERE task_keyword = '{matched_keyword}'
         """
@@ -80,7 +79,6 @@ def fetch_roles_for_task_from_snowflake(user_input):
     except Exception as e:
         st.error(f"Error fetching task roles: {e}")
         return None
-
 
 def answer_proposal_question(req, faq_df):
     task_df = fetch_roles_for_task_from_snowflake(req)
@@ -96,9 +94,6 @@ def answer_proposal_question(req, faq_df):
     else:
         return "This requirement will be addressed in the final submission per project scope."
 
-
-
-
 # FAQ and navigation
 faq_df = load_faq_from_snowflake()
 page = st.sidebar.selectbox("Go to", ["Dashboard", "Upload RFP", "Extract Labor Roles", "Estimate Labor Cost"])
@@ -110,15 +105,8 @@ with st.sidebar:
     if user_query:
         st.markdown(answer_proposal_question(user_query, faq_df))
 
-
-
     st.markdown("### 📄 Upload RFP for Summary")
     uploaded_chat_file = st.file_uploader("Choose a DOCX RFP", type=["docx"])
-
-    # The rest of your assistant and document processing continues here...
-
-
-    
 
     if uploaded_chat_file:
         extracted_text = extract_text_from_docx(uploaded_chat_file)
@@ -127,17 +115,14 @@ with st.sidebar:
             st.text_area("Text Preview", extracted_text, height=300)
 
         if st.button("📄 Generate Proposal Summary"):
-            roles_data = extract_roles_from_structured_blocks(extracted_text)
-            if not roles_data:
-                roles_data = suggest_roles_from_project(extracted_text)
-                st.info("⚠️ Roles were inferred based on project scope.")
+            roles_data = fetch_roles_for_task_from_snowflake(extracted_text)
+            if roles_data is not None and not roles_data.empty:
+                df_roles = roles_data
+            else:
+                st.warning("⚠️ No roles matched in standard_task_roles.")
+                df_roles = pd.DataFrame()
 
-            proposal_reqs = extract_proposal_requirements(extracted_text)
-
-            if roles_data:
-                df_roles = pd.DataFrame(roles_data)
-                df_roles["total_cost"] = df_roles["count"] * df_roles["duration_days"] * df_roles["daily_rate"]
-
+            if not df_roles.empty:
                 doc = Document()
                 doc.add_heading("Proposal Summary", 0)
 
@@ -173,12 +158,6 @@ with st.sidebar:
 
                 doc.add_paragraph(f"\nEstimated Total Labor Cost: ${df_roles['total_cost'].sum():,.2f}")
 
-                if proposal_reqs:
-                    doc.add_heading("Responses to Proposal Requirements", level=1)
-                    for req in proposal_reqs:
-                        doc.add_paragraph(f"• {req}", style='List Bullet')
-                        doc.add_paragraph(answer_proposal_question(req, faq_df), style='Intense Quote')
-
                 buffer = BytesIO()
                 doc.save(buffer)
                 buffer.seek(0)
@@ -190,6 +169,7 @@ with st.sidebar:
                     file_name="proposal_summary.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
+
 
 
 # ----------------------- Dashboard ---------------------------
