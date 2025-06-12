@@ -98,12 +98,19 @@ page = st.sidebar.selectbox("Go to", ["Dashboard", "Upload RFP", "Extract Labor 
 
 # ----------------------- Sidebar Assistant Chat ---------------------------
 with st.sidebar:
+    with st.sidebar:
     st.markdown("### 🤖 Assistant")
+
+    # Show chatbox always
     user_query = st.text_input("Ask something about the RFP process:")
     if user_query:
         st.write(answer_proposal_question(user_query, faq_df))
 
-    uploaded_chat_file = st.file_uploader("Upload RFP to get summary", type=["docx"])
+    # Then allow file upload
+    st.markdown("### 📄 Upload RFP for Summary")
+    uploaded_chat_file = st.file_uploader("Choose a DOCX RFP", type=["docx"])
+
+    
 
     if uploaded_chat_file:
         extracted_text = extract_text_from_docx(uploaded_chat_file)
