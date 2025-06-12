@@ -41,10 +41,11 @@ def load_faq_from_snowflake():
         return pd.DataFrame(columns=["question", "answer"])
 
 def extract_task_keywords(user_input, keyword_list):
-    for keyword in keyword_list:
-        if keyword.lower() in user_input.lower():
-            return keyword
+    matches = difflib.get_close_matches(user_input.lower(), [kw.lower() for kw in keyword_list], n=1, cutoff=0.3)
+    if matches:
+        return matches[0]
     return None
+
 
 @st.cache_data(ttl=600)
 def fetch_roles_for_task_from_snowflake(user_input):
