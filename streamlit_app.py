@@ -90,39 +90,43 @@ def generate_response_doc(df):
 
 
 with st.sidebar:
-    st.markdown("### 🤖 Assistant (Upload RFP)")
-    uploaded_chat_file = st.file_uploader("Upload RFP file (PDF/DOCX)", type=["pdf", "docx"], key="sidebar_upload")
-
+    st.markdown("### 🤖 Assistant")
+    uploaded_chat_file = st.file_uploader("Upload RFP to get summary", type=["docx"])
+    
     if uploaded_chat_file:
-        st.success("File uploaded successfully.")
+        extracted_text = extract_text_from_docx(uploaded_chat_file)
+        
+        # Display extracted content (optional)
+        with st.expander("📝 Extracted RFP Content"):
+            st.text_area("Text Preview", extracted_text, height=300)
 
-        # Extract text
-        if uploaded_chat_file.name.endswith(".pdf"):
-            text = extract_text_from_pdf(uploaded_chat_file)
-        else:
-            text = extract_text_from_docx(uploaded_chat_file)
+        if st.button("📄 Generate Proposal Summary"):
+            import re
 
-        # Extract labor info
-        labor_df = extract_labor_info(text)
+            # Extract labor roles using simple pattern matching
+            roles = re.findall(r"\b(?:Engineer|Technician|Manager|Operator|Supervisor|Welder|Electrician|Inspector)\b", extracted_text, re.IGNORECASE)
+            roles_count = {role: roles.count(role) for role in set(roles)}
 
-        if labor_df.empty:
-            st.warning("No labor-related info found.")
-        else:
-            st.write("📋 Extracted Labor Roles:")
-            st.dataframe(labor_df)
+            # Create a Word document in memory
+            summary_doc = Document()
+            summary_doc.add_heading("Proposal Summary", 0)
+            summary_doc.add_paragraph("Below is a summary of labor requirements based on the uploaded RFP document:\n")
 
-            # Generate and download response
-            if st.button("📄 Generate Proposal Summary"):
-                proposal = generate_response_doc(labor_df)
+            for role, count in roles_count.items():
+                summary_doc.add_paragraph(f"{role.title()}: {count} needed")
 
-                # Offer download
-                st.download_button(
-                    label="⬇️ Download Proposal Document",
-                    data=proposal,
-                    file_name="Proposal_Summary.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+            # Save the document to an in-memory buffer
+            buffer = io.BytesIO()
+            summary_doc.save(buffer)
+            buffer.seek(0)
 
+            st.success("✅ Summary document generated.")
+            st.download_button(
+                label="⬇️ Download Proposal Summary",
+                data=buffer,
+                file_name="proposal_summary.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
 
 
 if page == "Dashboard":
