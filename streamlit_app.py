@@ -59,15 +59,14 @@ def fetch_roles_for_task_from_snowflake(task_input):
             return None
         matched_keyword = best_match[0]
         query = f"""
-                SELECT role, "count", duration_days, daily_rate
-                FROM standard_task_roles
-                WHERE task_keyword = '{matched_keyword}'
-            """
-
+            SELECT role, "count", duration_days, daily_rate
+            FROM standard_task_roles
+            WHERE task_keyword = '{matched_keyword}'
+        """
         df = pd.read_sql(query, conn)
         df.columns = [c.lower() for c in df.columns]
         df["total_cost"] = df["count"] * df["duration_days"] * df["daily_rate"]
-
+        st.write("✅ Matched Roles for Task:", df)
         return df
     except Exception as e:
         st.error(f"Error fetching task roles: {e}")
@@ -75,7 +74,7 @@ def fetch_roles_for_task_from_snowflake(task_input):
 
 def answer_proposal_question(req, faq_df):
     task_df = fetch_roles_for_task_from_snowflake(req)
-    if task_df is not None:
+    if task_df is not None and not task_df.empty:
         total = task_df["total_cost"].sum()
         table = task_df.to_markdown(index=False)
         return f"Estimated Labor Cost Breakdown:\n\n{table}\n\n**Total Estimated Cost:** ${total:,.2f}"
@@ -97,6 +96,7 @@ with st.sidebar:
     user_query = st.text_input("Ask something about the RFP process:")
     if user_query:
         st.markdown(answer_proposal_question(user_query, faq_df))
+
 
 
     st.markdown("### 📄 Upload RFP for Summary")
