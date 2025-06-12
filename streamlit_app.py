@@ -59,12 +59,15 @@ def fetch_roles_for_task_from_snowflake(task_input):
             return None
         matched_keyword = best_match[0]
         query = f"""
-            SELECT role, count, duration_days, daily_rate
-            FROM standard_task_roles
-            WHERE task_keyword = '{matched_keyword}'
-        """
+                SELECT role, "count", duration_days, daily_rate
+                FROM standard_task_roles
+                WHERE task_keyword = '{matched_keyword}'
+            """
+
         df = pd.read_sql(query, conn)
+        df.columns = [c.lower() for c in df.columns]
         df["total_cost"] = df["count"] * df["duration_days"] * df["daily_rate"]
+
         return df
     except Exception as e:
         st.error(f"Error fetching task roles: {e}")
