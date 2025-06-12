@@ -40,8 +40,14 @@ def load_faq_from_snowflake():
         st.error(f"Failed to load chatbot Q&A: {e}")
         return pd.DataFrame(columns=["question", "answer"])
 
+def extract_task_keywords(user_input, keyword_list):
+    for keyword in keyword_list:
+        if keyword.lower() in user_input.lower():
+            return keyword
+    return None
+
 @st.cache_data(ttl=600)
-def fetch_roles_for_task_from_snowflake(task_input):
+def fetch_roles_for_task_from_snowflake(user_input):
     try:
         conn = snowflake.connector.connect(
             user=st.secrets["snowflake"]["user"],
@@ -54,10 +60,13 @@ def fetch_roles_for_task_from_snowflake(task_input):
         cursor = conn.cursor()
         cursor.execute("SELECT DISTINCT task_keyword FROM standard_task_roles")
         all_keywords = [row[0] for row in cursor.fetchall()]
-        best_match = difflib.get_close_matches(task_input.lower(), all_keywords, n=1, cutoff=0.4)
-        if not best_match:
+
+        # Match only if keyword is found in user input
+        matched_keyword = extract_task_keywords(user_input, all_keywords)
+
+        if not matched_keyword:
             return None
-        matched_keyword = best_match[0]
+
         query = f"""
             SELECT role, "count", duration_days, daily_rate
             FROM standard_task_roles
@@ -66,11 +75,12 @@ def fetch_roles_for_task_from_snowflake(task_input):
         df = pd.read_sql(query, conn)
         df.columns = [c.lower() for c in df.columns]
         df["total_cost"] = df["count"] * df["duration_days"] * df["daily_rate"]
-        st.write("✅ Matched Roles for Task:", df)
         return df
+
     except Exception as e:
         st.error(f"Error fetching task roles: {e}")
         return None
+
 
 def answer_proposal_question(req, faq_df):
     task_df = fetch_roles_for_task_from_snowflake(req)
@@ -85,6 +95,9 @@ def answer_proposal_question(req, faq_df):
         return faq_df.loc[faq_df['question'].str.lower() == match, 'answer'].values[0]
     else:
         return "This requirement will be addressed in the final submission per project scope."
+
+
+
 
 # FAQ and navigation
 faq_df = load_faq_from_snowflake()
