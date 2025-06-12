@@ -14,7 +14,6 @@ from collections import Counter
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-
 # ----------------------- Helper Functions ---------------------------
 def extract_text_from_docx(file):
     doc = Document(file)
@@ -41,52 +40,43 @@ def load_faq_from_snowflake():
         st.error(f"Failed to load chatbot Q&A: {e}")
         return pd.DataFrame(columns=["question", "answer"])
 
-def extract_roles_from_structured_blocks(text):
-    pattern = re.compile(
-        r"(?P<role>[A-Za-z ]+?)\s*-\s*Count:\s*(?P<count>\d+)\s*-\s*Duration:\s*(?P<duration>\d+)\s*Days\s*-\s*Daily Rate:\s*\$(?P<rate>\d+)",
-        re.IGNORECASE
-    )
-    matches = pattern.findall(text)
-    roles = []
-    for role, count, duration, rate in matches:
-        roles.append({
-            "role": role.strip(),
-            "count": int(count),
-            "duration_days": int(duration),
-            "daily_rate": int(rate),
-            "notes": ""
-        })
-    return roles
-
-def suggest_roles_from_project(text):
-    text = text.lower()
-    if "offshore" in text and "drilling" in text:
-        return [
-            {"role": "Drilling Engineer", "count": 2, "duration_days": 45, "daily_rate": 1200, "notes": ""},
-            {"role": "Rig Worker", "count": 10, "duration_days": 45, "daily_rate": 500, "notes": ""},
-            {"role": "Safety Officer", "count": 1, "duration_days": 30, "daily_rate": 800, "notes": ""}
-        ]
-    elif "maintenance" in text:
-        return [
-            {"role": "Technician", "count": 5, "duration_days": 20, "daily_rate": 600, "notes": ""},
-            {"role": "Supervisor", "count": 1, "duration_days": 20, "daily_rate": 900, "notes": ""}
-        ]
-    elif "production" in text:
-        return [
-            {"role": "Production Engineer", "count": 2, "duration_days": 30, "daily_rate": 1000, "notes": ""},
-            {"role": "Operator", "count": 3, "duration_days": 30, "daily_rate": 700, "notes": ""}
-        ]
-    return []
-
-def extract_proposal_requirements(text):
-    match = re.search(r"Proposal Requirements:\s*(.*?)\s*(Submission Deadline:|Contact for Clarifications:|$)", text, re.DOTALL | re.IGNORECASE)
-    if match:
-        raw = match.group(1).strip()
-        lines = [line.strip("-• ").strip() for line in raw.split("\n") if line.strip()]
-        return lines
-    return []
+@st.cache_data(ttl=600)
+def fetch_roles_for_task_from_snowflake(task_input):
+    try:
+        conn = snowflake.connector.connect(
+            user=st.secrets["snowflake"]["user"],
+            password=st.secrets["snowflake"]["password"],
+            account=st.secrets["snowflake"]["account"],
+            warehouse=st.secrets["snowflake"]["warehouse"],
+            database=st.secrets["snowflake"]["database"],
+            schema=st.secrets["snowflake"]["schema"]
+        )
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT task_keyword FROM standard_task_roles")
+        all_keywords = [row[0] for row in cursor.fetchall()]
+        best_match = difflib.get_close_matches(task_input.lower(), all_keywords, n=1, cutoff=0.4)
+        if not best_match:
+            return None
+        matched_keyword = best_match[0]
+        query = f"""
+            SELECT role, count, duration_days, daily_rate
+            FROM standard_task_roles
+            WHERE task_keyword = '{matched_keyword}'
+        """
+        df = pd.read_sql(query, conn)
+        df["total_cost"] = df["count"] * df["duration_days"] * df["daily_rate"]
+        return df
+    except Exception as e:
+        st.error(f"Error fetching task roles: {e}")
+        return None
 
 def answer_proposal_question(req, faq_df):
+    task_df = fetch_roles_for_task_from_snowflake(req)
+    if task_df is not None:
+        total = task_df["total_cost"].sum()
+        table = task_df.to_markdown(index=False)
+        return f"Estimated Labor Cost Breakdown:\n\n{table}\n\n**Total Estimated Cost:** ${total:,.2f}"
+
     matches = difflib.get_close_matches(req.lower(), faq_df['question'].str.lower(), n=1, cutoff=0.4)
     if matches:
         match = matches[0]
@@ -94,16 +84,17 @@ def answer_proposal_question(req, faq_df):
     else:
         return "This requirement will be addressed in the final submission per project scope."
 
-# ✅ Now define page selector safely after set_page_config
+# FAQ and navigation
 faq_df = load_faq_from_snowflake()
 page = st.sidebar.selectbox("Go to", ["Dashboard", "Upload RFP", "Extract Labor Roles", "Estimate Labor Cost"])
 
-# ----------------------- Sidebar Assistant Chat ---------------------------
+# ----------------------- Sidebar Assistant ---------------------------
 with st.sidebar:
     st.markdown("### 🤖 Assistant")
     user_query = st.text_input("Ask something about the RFP process:")
     if user_query:
-        st.write(answer_proposal_question(user_query, faq_df))
+        st.markdown(answer_proposal_question(user_query, faq_df))
+
 
     st.markdown("### 📄 Upload RFP for Summary")
     uploaded_chat_file = st.file_uploader("Choose a DOCX RFP", type=["docx"])
