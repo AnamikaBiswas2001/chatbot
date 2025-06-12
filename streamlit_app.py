@@ -9,9 +9,11 @@ import re
 from collections import Counter
 
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity 
+from sklearn.metrics.pairwise import cosine_similarity
 
-page = st.sidebar.selectbox("Go to", ["Dashboard", "Upload RFP", "Extract Labor Roles", "Estimate Labor Cost"])
+# ✅ This must be the first Streamlit command
+st.set_page_config(page_title="AI-Enhanced RFP Estimator", layout="wide")
+
 # ----------------------- Helper Functions ---------------------------
 def extract_text_from_docx(file):
     doc = Document(file)
@@ -91,23 +93,22 @@ def answer_proposal_question(req, faq_df):
     else:
         return "This requirement will be addressed in the final submission per project scope."
 
-# ----------------------- Streamlit UI ---------------------------
-st.set_page_config(page_title="AI-Enhanced RFP Estimator", layout="wide")
+# ✅ Now define page selector safely after set_page_config
 faq_df = load_faq_from_snowflake()
 page = st.sidebar.selectbox("Go to", ["Dashboard", "Upload RFP", "Extract Labor Roles", "Estimate Labor Cost"])
 
 # ----------------------- Sidebar Assistant Chat ---------------------------
 with st.sidebar:
     st.markdown("### 🤖 Assistant")
-
-    # Show chatbox always
     user_query = st.text_input("Ask something about the RFP process:")
     if user_query:
         st.write(answer_proposal_question(user_query, faq_df))
 
-    # Then allow file upload
     st.markdown("### 📄 Upload RFP for Summary")
     uploaded_chat_file = st.file_uploader("Choose a DOCX RFP", type=["docx"])
+
+    # The rest of your assistant and document processing continues here...
+
 
     
 
