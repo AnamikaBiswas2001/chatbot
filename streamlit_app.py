@@ -3,6 +3,7 @@ import pandas as pd
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
 import difflib
+import io
 from docx import Document
 from io import BytesIO
 
