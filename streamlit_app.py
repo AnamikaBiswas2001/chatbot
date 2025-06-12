@@ -6,6 +6,7 @@ import difflib
 from docx import Document
 from io import BytesIO
 
+
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -43,11 +44,76 @@ def get_best_match(user_input):
         return answer
     return "I'm sorry, I don't understand that yet."
 
+
+
+def generate_response_doc(df):
+    doc = Document()
+    doc.add_heading("Proposal Summary", 0)
+
+    doc.add_paragraph("Thank you for the opportunity to submit our response for labor provisioning. Below is the breakdown of required roles:")
+
+    table = doc.add_table(rows=1, cols=5)
+    table.style = 'Table Grid'
+    hdr_cells = table.rows[0].cells
+    hdr_cells[0].text = 'Role'
+    hdr_cells[1].text = 'Count'
+    hdr_cells[2].text = 'Duration (Days)'
+    hdr_cells[3].text = 'Daily Rate'
+    hdr_cells[4].text = 'Notes'
+
+    for _, row in df.iterrows():
+        cells = table.add_row().cells
+        cells[0].text = str(row["role"])
+        cells[1].text = str(row.get("count", 1))
+        cells[2].text = str(row["duration_days"])
+        cells[3].text = f"${row['daily_rate']}"
+        cells[4].text = row.get("notes", "")
+
+    doc.add_paragraph()
+    total_cost = (df["count"] * df["duration_days"] * df["daily_rate"]).sum()
+    doc.add_paragraph(f"**Estimated Total Labor Cost:** ${total_cost:,.2f}")
+
+    # Save to buffer
+    buffer = BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
 with st.sidebar:
-    st.markdown("### 🤖 Assistant")
-    query = st.text_input("Ask something about the RFP process:")
-    if query:
-        st.write(get_best_match(query))
+    st.markdown("### 🤖 Assistant (Upload RFP)")
+    uploaded_chat_file = st.file_uploader("Upload RFP file (PDF/DOCX)", type=["pdf", "docx"], key="sidebar_upload")
+
+    if uploaded_chat_file:
+        st.success("File uploaded successfully.")
+
+        # Extract text
+        if uploaded_chat_file.name.endswith(".pdf"):
+            text = extract_text_from_pdf(uploaded_chat_file)
+        else:
+            text = extract_text_from_docx(uploaded_chat_file)
+
+        # Extract labor info
+        labor_df = extract_labor_info(text)
+
+        if labor_df.empty:
+            st.warning("No labor-related info found.")
+        else:
+            st.write("📋 Extracted Labor Roles:")
+            st.dataframe(labor_df)
+
+            # Generate and download response
+            if st.button("📄 Generate Proposal Summary"):
+                proposal = generate_response_doc(labor_df)
+
+                # Offer download
+                st.download_button(
+                    label="⬇️ Download Proposal Document",
+                    data=proposal,
+                    file_name="Proposal_Summary.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+
 
 if page == "Dashboard":
     st.title("📊 AI-Enhanced RFP Estimator - Labor Cost Focus")
