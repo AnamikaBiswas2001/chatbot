@@ -98,7 +98,6 @@ page = st.sidebar.selectbox("Go to", ["Dashboard", "Upload RFP", "Extract Labor 
 
 # ----------------------- Sidebar Assistant Chat ---------------------------
 with st.sidebar:
-    with st.sidebar:
     st.markdown("### 🤖 Assistant")
 
     # Show chatbox always
