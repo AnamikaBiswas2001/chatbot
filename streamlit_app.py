@@ -10,6 +10,7 @@ from docx import Document
 from io import BytesIO
 import re
 from collections import Counter
+
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -40,10 +41,11 @@ def load_faq_from_snowflake():
         return pd.DataFrame(columns=["question", "answer"])
 
 def extract_task_keywords(user_input, keyword_list):
-    for keyword in keyword_list:
-        if keyword and keyword.lower() in user_input.lower():
-            return keyword
+    matches = difflib.get_close_matches(user_input.lower(), [kw.lower() for kw in keyword_list], n=1, cutoff=0.3)
+    if matches:
+        return matches[0]
     return None
+
 
 @st.cache_data(ttl=600)
 def fetch_roles_for_task_from_snowflake(user_input):
@@ -62,14 +64,11 @@ def fetch_roles_for_task_from_snowflake(user_input):
 
         matched_keyword = extract_task_keywords(user_input, all_keywords)
 
-        st.write("🔍 Task keywords in database:", all_keywords)
-        st.write("📄 Matched keyword from input:", matched_keyword)
-
         if not matched_keyword:
             return None
 
         query = f"""
-            SELECT role, "count", duration_days, daily_rate
+            SELECT role, \"count\", duration_days, daily_rate
             FROM standard_task_roles
             WHERE task_keyword = '{matched_keyword}'
         """
@@ -96,9 +95,11 @@ def answer_proposal_question(req, faq_df):
     else:
         return "This requirement will be addressed in the final submission per project scope."
 
+# FAQ and navigation
 faq_df = load_faq_from_snowflake()
 page = st.sidebar.selectbox("Go to", ["Dashboard", "Upload RFP", "Extract Labor Roles", "Estimate Labor Cost"])
 
+# ----------------------- Sidebar Assistant ---------------------------
 with st.sidebar:
     st.markdown("### 🤖 Assistant")
     user_query = st.text_input("Ask something about the RFP process:")
@@ -169,7 +170,6 @@ with st.sidebar:
                     file_name="proposal_summary.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
-
 
 
 
