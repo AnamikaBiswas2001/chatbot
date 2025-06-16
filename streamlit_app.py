@@ -108,6 +108,32 @@ def extract_proposal_requirements(text):
         return [line.strip("-• ").strip() for line in raw.split("\n") if line.strip()]
     return []
 
+def extract_project_info(text):
+    info = {
+        "Project Title": "",
+        "Client": "",
+        "Location": "",
+        "Estimated Duration": "",
+        "Start Date": "",
+        "Scope of Work": ""
+    }
+
+    patterns = {
+        "Project Title": r"Project Title:\s*(.*)",
+        "Client": r"Client:\s*(.*)",
+        "Location": r"Location:\s*(.*)",
+        "Estimated Duration": r"Estimated Duration:\s*(.*)",
+        "Start Date": r"Start Date:\s*(.*)",
+        "Scope of Work": r"Scope of Work:\s*(.*?)(Proposal Requirements:|Submission Deadline:|Contact for Clarifications:|$)"
+    }
+
+    for key, pattern in patterns.items():
+        match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+        if match:
+            info[key] = match.group(1).strip().replace("\n", " ")
+    return info
+
+
 # ----------------- Main App -----------------
 keywords = load_keywords_from_snowflake()
 faq_df = load_faq_from_snowflake()
@@ -139,6 +165,15 @@ with tab2:
     if doc_file:
         text = extract_text_from_docx(doc_file)
         st.text_area("📜 Extracted RFP Text", text, height=250)
+
+        project_info = extract_project_info(text)
+
+        # Display project info summary
+        st.subheader("📋 Project Information")
+        for key, value in project_info.items():
+            if value:
+                st.markdown(f"**{key}:** {value}")
+
 
         keyword = extract_semantic_keyword(text, keywords)
         if keyword:
