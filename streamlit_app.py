@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import snowflake.connector
 from docx import Document
+import re
 from io import BytesIO
 import difflib
 from sklearn.feature_extraction.text import TfidfVectorizer
