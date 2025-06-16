@@ -30,27 +30,6 @@ def load_keywords_from_snowflake():
         st.error(f"Failed to load keywords: {e}")
         return []
 
-@st.cache_data(ttl=600)
-def load_faq_from_snowflake():
-    try:
-        conn = snowflake.connector.connect(
-            user=st.secrets["snowflake"]["user"],
-            password=st.secrets["snowflake"]["password"],
-            account=st.secrets["snowflake"]["account"],
-            warehouse=st.secrets["snowflake"]["warehouse"],
-            database=st.secrets["snowflake"]["database"],
-            schema=st.secrets["snowflake"]["schema"]
-        )
-        cursor = conn.cursor()
-        cursor.execute("SELECT question, answer FROM chatbot_faq")
-        data = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        return pd.DataFrame(data, columns=["question", "answer"])
-    except Exception as e:
-        st.error(f"Failed to load chatbot FAQ: {e}")
-        return pd.DataFrame(columns=["question", "answer"])
-
 def extract_text_from_docx(file):
     doc = Document(file)
     return "\n".join([para.text for para in doc.paragraphs])
@@ -75,7 +54,7 @@ def fetch_roles_for_keyword(keyword):
             schema=st.secrets["snowflake"]["schema"]
         )
         query = f"""
-            SELECT role, \"count\", duration_days, daily_rate
+            SELECT role, "count", duration_days, daily_rate
             FROM standard_task_roles
             WHERE LOWER(task_keyword) = '{keyword.lower()}'
         """
@@ -93,53 +72,45 @@ def display_estimate(df):
     st.dataframe(df[["role", "count", "duration_days", "daily_rate", "total_cost"]])
     st.success(f"💰 Total Estimated Cost: ${df['total_cost'].sum():,.2f}")
 
-def extract_proposal_requirements(text):
-    match = re.search(r"Proposal Requirements:\s*(.*?)\s*(Submission Deadline:|Contact for Clarifications:|$)", text, re.DOTALL | re.IGNORECASE)
-    if match:
-        raw = match.group(1).strip()
-        lines = [line.strip("-• ").strip() for line in raw.split("\n") if line.strip()]
-        return lines
-    return []
-
-def extract_proposal_requirements(text):
-    match = re.search(r"Proposal Requirements:\s*(.*?)\s*(Submission Deadline:|Contact for Clarifications:|$)", text, re.DOTALL | re.IGNORECASE)
-    if match:
-        raw = match.group(1).strip()
-        return [line.strip("-• ").strip() for line in raw.split("\n") if line.strip()]
-    return []
+@st.cache_data(ttl=600)
+def load_faq_from_snowflake():
+    try:
+        conn = snowflake.connector.connect(
+            user=st.secrets["snowflake"]["user"],
+            password=st.secrets["snowflake"]["password"],
+            account=st.secrets["snowflake"]["account"],
+            warehouse=st.secrets["snowflake"]["warehouse"],
+            database=st.secrets["snowflake"]["database"],
+            schema=st.secrets["snowflake"]["schema"]
+        )
+        cursor = conn.cursor()
+        cursor.execute("SELECT question, answer FROM chatbot_faq")
+        data = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return pd.DataFrame(data, columns=["question", "answer"])
+    except Exception as e:
+        st.error(f"Failed to load chatbot FAQ: {e}")
+        return pd.DataFrame(columns=["question", "answer"])
 
 def extract_project_info(text):
-    info = {
-        "Project Title": "",
-        "Client": "",
-        "Location": "",
-        "Estimated Duration": "",
-        "Start Date": "",
-        "Scope of Work": ""
-    }
-
-    patterns = {
+    info = {}
+    fields = {
         "Project Title": r"Project Title:\s*(.*)",
+        "Project Type": r"Project Type:\s*(.*)",
         "Client": r"Client:\s*(.*)",
         "Location": r"Location:\s*(.*)",
         "Estimated Duration": r"Estimated Duration:\s*(.*)",
         "Start Date": r"Start Date:\s*(.*)",
-        # Scope of Work until next header
-        "Scope of Work": r"Scope of Work:\s*(.*?)(?:Proposal Requirements:|Submission Deadline:|Contact for Clarifications:|$)"
+        "Scope of Work": r"Scope of Work:\s*(.*?)(?=\n[A-Z][a-zA-Z ]*?:|Proposal Requirements:|Submission Deadline:|Contact for Clarifications:|$)"
     }
-
-    for key, pattern in patterns.items():
+    for key, pattern in fields.items():
         match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
         if match:
-            raw = match.group(1).strip()
-            # Remove any line breaks or excessive whitespace
-            cleaned = " ".join(raw.split())
-            info[key] = cleaned
-
+            info[key] = match.group(1).strip()
     return info
 
-
-# ----------------- Main App -----------------
+# ----------------- UI: Text or File Input -----------------
 keywords = load_keywords_from_snowflake()
 faq_df = load_faq_from_snowflake()
 
@@ -149,7 +120,6 @@ with tab1:
     user_input = st.text_input("Enter project-related question or task description:")
     if user_input:
         keyword = extract_semantic_keyword(user_input, keywords)
-
         if keyword:
             df_roles = fetch_roles_for_keyword(keyword)
             if not df_roles.empty:
@@ -172,33 +142,16 @@ with tab2:
         st.text_area("📜 Extracted RFP Text", text, height=250)
 
         project_info = extract_project_info(text)
-
-        st.subheader("📋 Project Information")
-        for k, v in project_info.items():
-            if v:
+        if project_info:
+            st.subheader("📋 Project Details")
+            for k, v in project_info.items():
                 st.markdown(f"**{k}:** {v}")
-
 
         keyword = extract_semantic_keyword(text, keywords)
         if keyword:
             df_roles = fetch_roles_for_keyword(keyword)
             if not df_roles.empty:
                 display_estimate(df_roles)
-
-                st.markdown("---")
-                st.markdown("### 📝 Responses to Proposal Requirements")
-                requirements = extract_proposal_requirements(text)
-                if requirements:
-                    st.subheader("📌 Proposal Requirements & Responses")
-                    for req in requirements:
-                        st.markdown(f"**• {req}**")
-                        match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
-                        if match:
-                            answer = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
-                            st.markdown(f"✅ {answer}")
-                        else:
-                            st.markdown("❓ This requirement will be addressed in the proposal.")
-
             else:
                 st.warning("No roles found in the database for the detected keyword.")
         else:
