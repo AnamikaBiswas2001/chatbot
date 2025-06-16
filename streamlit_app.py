@@ -9,10 +9,6 @@ import difflib
 from docx import Document
 from io import BytesIO
 import re
-from collections import Counter
-
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 
 # ----------------------- Helper Functions ---------------------------
 def extract_text_from_docx(file):
@@ -40,15 +36,15 @@ def load_faq_from_snowflake():
         st.error(f"Failed to load chatbot Q&A: {e}")
         return pd.DataFrame(columns=["question", "answer"])
 
-def extract_task_keywords(user_input, keyword_list):
-    matches = difflib.get_close_matches(user_input.lower(), [kw.lower() for kw in keyword_list], n=1, cutoff=0.3)
-    if matches:
-        return matches[0]
+def extract_project_type(text):
+    keywords = ["drilling", "installation", "exploration", "production", "maintenance"]
+    for word in keywords:
+        if word in text.lower():
+            return word
     return None
 
-
 @st.cache_data(ttl=600)
-def fetch_roles_for_task_from_snowflake(user_input):
+def fetch_roles_by_project_type(project_type):
     try:
         conn = snowflake.connector.connect(
             user=st.secrets["snowflake"]["user"],
@@ -58,118 +54,90 @@ def fetch_roles_for_task_from_snowflake(user_input):
             database=st.secrets["snowflake"]["database"],
             schema=st.secrets["snowflake"]["schema"]
         )
-        cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT task_keyword FROM standard_task_roles")
-        all_keywords = [row[0] for row in cursor.fetchall()]
-
-        matched_keyword = extract_task_keywords(user_input, all_keywords)
-
-        if not matched_keyword:
-            return None
-
         query = f"""
-            SELECT role, \"count\", duration_days, daily_rate
+            SELECT role, "count", duration_days, daily_rate
             FROM standard_task_roles
-            WHERE task_keyword = '{matched_keyword}'
+            WHERE LOWER(task_keyword) = '{project_type.lower()}'
         """
         df = pd.read_sql(query, conn)
         df.columns = [c.lower() for c in df.columns]
         df["total_cost"] = df["count"] * df["duration_days"] * df["daily_rate"]
         return df
-
     except Exception as e:
-        st.error(f"Error fetching task roles: {e}")
-        return None
+        st.error(f"Error fetching roles: {e}")
+        return pd.DataFrame()
 
-def answer_proposal_question(req, faq_df):
-    task_df = fetch_roles_for_task_from_snowflake(req)
-    if task_df is not None and not task_df.empty:
-        total = task_df["total_cost"].sum()
-        table = task_df.to_markdown(index=False)
-        return f"Estimated Labor Cost Breakdown:\n\n{table}\n\n**Total Estimated Cost:** ${total:,.2f}"
-
-    matches = difflib.get_close_matches(req.lower(), faq_df['question'].str.lower(), n=1, cutoff=0.4)
-    if matches:
-        match = matches[0]
-        return faq_df.loc[faq_df['question'].str.lower() == match, 'answer'].values[0]
-    else:
-        return "This requirement will be addressed in the final submission per project scope."
-
-# FAQ and navigation
+# ----------------------- App Interface ---------------------------
 faq_df = load_faq_from_snowflake()
-page = st.sidebar.selectbox("Go to", ["Dashboard", "Upload RFP", "Extract Labor Roles", "Estimate Labor Cost"])
+page = st.sidebar.selectbox("Go to", ["Dashboard", "Upload RFP"])
 
-# ----------------------- Sidebar Assistant ---------------------------
+# ---------------- Sidebar Chat Assistant ----------------
 with st.sidebar:
     st.markdown("### 🤖 Assistant")
     user_query = st.text_input("Ask something about the RFP process:")
     if user_query:
-        st.markdown(answer_proposal_question(user_query, faq_df))
-
-    st.markdown("### 📄 Upload RFP for Summary")
-    uploaded_chat_file = st.file_uploader("Choose a DOCX RFP", type=["docx"])
-
-    if uploaded_chat_file:
-        extracted_text = extract_text_from_docx(uploaded_chat_file)
-
-        with st.expander("📝 Extracted RFP Content"):
-            st.text_area("Text Preview", extracted_text, height=300)
-
-        if st.button("📄 Generate Proposal Summary"):
-            roles_data = fetch_roles_for_task_from_snowflake(extracted_text)
-            if roles_data is not None and not roles_data.empty:
-                df_roles = roles_data
+        proj_type = extract_project_type(user_query)
+        if proj_type:
+            df_resp = fetch_roles_by_project_type(proj_type)
+            if not df_resp.empty:
+                st.markdown("**Estimated Labor Cost:**")
+                st.dataframe(df_resp[["role", "count", "duration_days", "daily_rate", "total_cost"]])
+                st.markdown(f"**Total:** ${df_resp['total_cost'].sum():,.2f}")
             else:
-                st.warning("⚠️ No roles matched in standard_task_roles.")
-                df_roles = pd.DataFrame()
+                st.warning("No roles matched from database.")
+        else:
+            st.info("Couldn't detect task keyword. Try mentioning drilling, installation, etc.")
 
-            if not df_roles.empty:
-                doc = Document()
-                doc.add_heading("Proposal Summary", 0)
+# ---------------- Upload and Process RFP ----------------
+if page == "Upload RFP":
+    st.title("📁 Upload RFP Document")
+    uploaded_file = st.file_uploader("Upload your DOCX RFP file", type=["docx"])
 
-                doc.add_paragraph("Labor Requirements:")
-                table1 = doc.add_table(rows=1, cols=3)
-                table1.style = 'Table Grid'
-                hdr_cells = table1.rows[0].cells
-                hdr_cells[0].text = 'Role'
-                hdr_cells[1].text = 'Count'
-                hdr_cells[2].text = 'Duration (Days)'
-                for _, row in df_roles.iterrows():
-                    cells = table1.add_row().cells
-                    cells[0].text = row["role"]
-                    cells[1].text = str(row["count"])
-                    cells[2].text = str(row["duration_days"])
+    if uploaded_file:
+        text = extract_text_from_docx(uploaded_file)
+        st.text_area("📜 RFP Text Extracted", text, height=300)
 
-                doc.add_heading("Labor Cost Estimation", level=1)
-                table2 = doc.add_table(rows=1, cols=5)
-                table2.style = 'Table Grid'
-                hdr = table2.rows[0].cells
-                hdr[0].text = 'Role'
-                hdr[1].text = 'Count'
-                hdr[2].text = 'Duration'
-                hdr[3].text = 'Rate'
-                hdr[4].text = 'Total Cost'
-                for _, row in df_roles.iterrows():
-                    row_cells = table2.add_row().cells
-                    row_cells[0].text = row["role"]
-                    row_cells[1].text = str(row["count"])
-                    row_cells[2].text = str(row["duration_days"])
-                    row_cells[3].text = f"${row['daily_rate']}"
-                    row_cells[4].text = f"${row['total_cost']:,.2f}"
+        if st.button("📄 Generate Labor Estimation Summary"):
+            proj_type = extract_project_type(text)
+            if proj_type:
+                df_roles = fetch_roles_by_project_type(proj_type)
+                if not df_roles.empty:
+                    total_cost = df_roles["total_cost"].sum()
+                    doc = Document()
+                    doc.add_heading("Proposal Summary", 0)
+                    doc.add_paragraph(f"Detected Project Type: {proj_type.title()}")
+                    doc.add_heading("Labor Cost Estimation", level=1)
 
-                doc.add_paragraph(f"\nEstimated Total Labor Cost: ${df_roles['total_cost'].sum():,.2f}")
+                    table = doc.add_table(rows=1, cols=5)
+                    table.style = 'Table Grid'
+                    headers = ["Role", "Count", "Duration", "Rate", "Total Cost"]
+                    for i, h in enumerate(headers):
+                        table.rows[0].cells[i].text = h
 
-                buffer = BytesIO()
-                doc.save(buffer)
-                buffer.seek(0)
+                    for _, row in df_roles.iterrows():
+                        row_cells = table.add_row().cells
+                        row_cells[0].text = row["role"]
+                        row_cells[1].text = str(row["count"])
+                        row_cells[2].text = str(row["duration_days"])
+                        row_cells[3].text = f"${row['daily_rate']}"
+                        row_cells[4].text = f"${row['total_cost']:,.2f}"
 
-                st.success("✅ Summary document generated.")
-                st.download_button(
-                    label="⬇️ Download Proposal Summary",
-                    data=buffer,
-                    file_name="proposal_summary.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+                    doc.add_paragraph(f"\nEstimated Total Labor Cost: ${total_cost:,.2f}")
+                    buffer = BytesIO()
+                    doc.save(buffer)
+                    buffer.seek(0)
+
+                    st.download_button(
+                        label="⬇️ Download DOCX Summary",
+                        data=buffer,
+                        file_name="proposal_summary.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
+                else:
+                    st.warning("⚠️ No labor roles found for this project type.")
+            else:
+                st.error("⚠️ Could not determine project type from the RFP document.")
+
 
 
 
