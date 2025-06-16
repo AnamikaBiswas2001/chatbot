@@ -124,13 +124,18 @@ def extract_project_info(text):
         "Location": r"Location:\s*(.*)",
         "Estimated Duration": r"Estimated Duration:\s*(.*)",
         "Start Date": r"Start Date:\s*(.*)",
-        "Scope of Work": r"Scope of Work:\s*(.*?)(Proposal Requirements:|Submission Deadline:|Contact for Clarifications:|$)"
+        # Scope of Work until next header
+        "Scope of Work": r"Scope of Work:\s*(.*?)(?:Proposal Requirements:|Submission Deadline:|Contact for Clarifications:|$)"
     }
 
     for key, pattern in patterns.items():
-        match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
         if match:
-            info[key] = match.group(1).strip().replace("\n", " ")
+            raw = match.group(1).strip()
+            # Remove any line breaks or excessive whitespace
+            cleaned = " ".join(raw.split())
+            info[key] = cleaned
+
     return info
 
 
@@ -168,11 +173,10 @@ with tab2:
 
         project_info = extract_project_info(text)
 
-        # Display project info summary
         st.subheader("📋 Project Information")
-        for key, value in project_info.items():
-            if value:
-                st.markdown(f"**{key}:** {value}")
+        for k, v in project_info.items():
+            if v:
+                st.markdown(f"**{k}:** {v}")
 
 
         keyword = extract_semantic_keyword(text, keywords)
