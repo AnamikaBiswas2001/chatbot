@@ -64,6 +64,28 @@ def display_estimate(df):
     st.dataframe(df[["role", "count", "duration_days", "daily_rate", "total_cost"]])
     st.success(f"💰 Total Estimated Cost: ${df['total_cost'].sum():,.2f}")
 
+@st.cache_data(ttl=600)
+def load_faq_from_snowflake():
+    try:
+        conn = snowflake.connector.connect(
+            user=st.secrets["snowflake"]["user"],
+            password=st.secrets["snowflake"]["password"],
+            account=st.secrets["snowflake"]["account"],
+            warehouse=st.secrets["snowflake"]["warehouse"],
+            database=st.secrets["snowflake"]["database"],
+            schema=st.secrets["snowflake"]["schema"]
+        )
+        cursor = conn.cursor()
+        cursor.execute("SELECT question, answer FROM chatbot_faq")
+        data = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return pd.DataFrame(data, columns=["question", "answer"])
+    except Exception as e:
+        st.error(f"Failed to load chatbot FAQ: {e}")
+        return pd.DataFrame(columns=["question", "answer"])
+
+
 # ----------------- UI: Text or File Input -----------------
 keywords = load_keywords_from_snowflake()
 
