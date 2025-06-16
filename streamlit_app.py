@@ -70,17 +70,29 @@ keywords = load_keywords_from_snowflake()
 tab1, tab2 = st.tabs(["💬 Chat Query", "📄 Upload DOCX"])
 
 with tab1:
-    user_input = st.text_input("Enter project description (e.g., install drilling machine):")
+    user_input = st.text_input("Enter project-related question or task description:")
     if user_input:
         keyword = extract_keyword(user_input, keywords)
+        
+        # Try estimating labor if a keyword is found
         if keyword:
             df_roles = fetch_roles_for_keyword(keyword)
             if not df_roles.empty:
                 display_estimate(df_roles)
             else:
                 st.warning("No matching labor roles found.")
+        
+        # If no task keyword found, try FAQ response
         else:
-            st.warning("No matching keyword found in your query.")
+            faq_df = load_faq_from_snowflake()
+            matches = difflib.get_close_matches(user_input.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
+            if matches:
+                match = matches[0]
+                response = faq_df.loc[faq_df["question"].str.lower() == match, "answer"].values[0]
+                st.markdown(f"**Answer:** {response}")
+            else:
+                st.warning("Sorry, I couldn't understand that question.")
+
 
 with tab2:
     doc_file = st.file_uploader("Upload a DOCX RFP file", type=["docx"])
