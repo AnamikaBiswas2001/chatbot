@@ -32,7 +32,11 @@ def extract_text_from_docx(file):
     return "\n".join([para.text for para in doc.paragraphs])
 
 def extract_keyword(text, keyword_list):
-    matches = difflib.get_close_matches(text.lower(), keyword_list, n=1, cutoff=0.3)
+    text_lower = text.lower()
+    for kw in keyword_list:
+        if kw in text_lower:
+            return kw
+    matches = difflib.get_close_matches(text_lower, keyword_list, n=1, cutoff=0.3)
     return matches[0] if matches else None
 
 def fetch_roles_for_keyword(keyword):
@@ -85,48 +89,47 @@ def load_faq_from_snowflake():
         st.error(f"Failed to load chatbot FAQ: {e}")
         return pd.DataFrame(columns=["question", "answer"])
 
+def answer_question_with_fallback(text, keyword_list, faq_df):
+    keyword = extract_keyword(text, keyword_list)
+    if keyword:
+        df = fetch_roles_for_keyword(keyword)
+        if not df.empty:
+            total = df["total_cost"].sum()
+            rows = "\n".join([
+                f"| {r['role']} | {r['count']} | {r['duration_days']} | ${r['daily_rate']} | ${r['total_cost']:,.2f} |"
+                for _, r in df.iterrows()
+            ])
+            return (
+                "Estimated Labor Cost Breakdown:\n\n"
+                "| Role | Count | Duration (Days) | Daily Rate | Total Cost |\n"
+                "|------|-------|------------------|-------------|-------------|\n"
+                f"{rows}\n\n"
+                f"**Total Estimated Cost:** ${total:,.2f}"
+            )
+
+    matches = difflib.get_close_matches(text.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
+    if matches:
+        match = matches[0]
+        return faq_df.loc[faq_df["question"].str.lower() == match, "answer"].values[0]
+    else:
+        return "Sorry, I couldn't understand that question."
 
 # ----------------- UI: Text or File Input -----------------
 keywords = load_keywords_from_snowflake()
+faq_df = load_faq_from_snowflake()
 
 tab1, tab2 = st.tabs(["💬 Chat Query", "📄 Upload DOCX"])
 
 with tab1:
     user_input = st.text_input("Enter project-related question or task description:")
     if user_input:
-        keyword = extract_keyword(user_input, keywords)
-        
-        # Try estimating labor if a keyword is found
-        if keyword:
-            df_roles = fetch_roles_for_keyword(keyword)
-            if not df_roles.empty:
-                display_estimate(df_roles)
-            else:
-                st.warning("No matching labor roles found.")
-        
-        # If no task keyword found, try FAQ response
-        else:
-            faq_df = load_faq_from_snowflake()
-            matches = difflib.get_close_matches(user_input.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
-            if matches:
-                match = matches[0]
-                response = faq_df.loc[faq_df["question"].str.lower() == match, "answer"].values[0]
-                st.markdown(f"**Answer:** {response}")
-            else:
-                st.warning("Sorry, I couldn't understand that question.")
-
+        response = answer_question_with_fallback(user_input, keywords, faq_df)
+        st.markdown(response)
 
 with tab2:
     doc_file = st.file_uploader("Upload a DOCX RFP file", type=["docx"])
     if doc_file:
         text = extract_text_from_docx(doc_file)
         st.text_area("📜 Extracted RFP Text", text, height=250)
-        keyword = extract_keyword(text, keywords)
-        if keyword:
-            df_roles = fetch_roles_for_keyword(keyword)
-            if not df_roles.empty:
-                display_estimate(df_roles)
-            else:
-                st.warning("No roles found in the database for the detected keyword.")
-        else:
-            st.warning("Could not detect project keyword from the document.")
+        response = answer_question_with_fallback(text, keywords, faq_df)
+        st.markdown(response)
