@@ -101,12 +101,12 @@ def extract_proposal_requirements(text):
         return lines
     return []
 
-def respond_to_requirement(req, faq_df):
-    matches = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
-    if matches:
-        match = matches[0]
-        return faq_df.loc[faq_df["question"].str.lower() == match, "answer"].values[0]
-    return "This requirement will be addressed in the proposal submission."
+def extract_proposal_requirements(text):
+    match = re.search(r"Proposal Requirements:\s*(.*?)\s*(Submission Deadline:|Contact for Clarifications:|$)", text, re.DOTALL | re.IGNORECASE)
+    if match:
+        raw = match.group(1).strip()
+        return [line.strip("-• ").strip() for line in raw.split("\n") if line.strip()]
+    return []
 
 # ----------------- Main App -----------------
 keywords = load_keywords_from_snowflake()
@@ -150,11 +150,16 @@ with tab2:
                 st.markdown("### 📝 Responses to Proposal Requirements")
                 requirements = extract_proposal_requirements(text)
                 if requirements:
+                    st.subheader("📌 Proposal Requirements & Responses")
                     for req in requirements:
-                        st.markdown(f"**{req}**")
-                        st.markdown(respond_to_requirement(req, faq_df))
-                else:
-                    st.info("No formal proposal requirements section detected.")
+                        st.markdown(f"**• {req}**")
+                        match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
+                        if match:
+                            answer = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
+                            st.markdown(f"✅ {answer}")
+                        else:
+                            st.markdown("❓ This requirement will be addressed in the proposal.")
+
             else:
                 st.warning("No roles found in the database for the detected keyword.")
         else:
