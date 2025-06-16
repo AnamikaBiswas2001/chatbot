@@ -89,54 +89,54 @@ with st.sidebar:
             st.info("Couldn't detect task keyword. Try mentioning drilling, installation, etc.")
 
 # ---------------- Upload and Process RFP ----------------
-if page == "Upload RFP":
-    st.title("📁 Upload RFP Document")
-    uploaded_file = st.file_uploader("Upload your DOCX RFP file", type=["docx"])
+    if page == "Upload RFP":
+        st.title("📁 Upload RFP Document")
+        uploaded_file = st.file_uploader("Upload your DOCX RFP file", type=["docx"])
 
-    if uploaded_file:
-        text = extract_text_from_docx(uploaded_file)
-        st.text_area("📜 RFP Text Extracted", text, height=300)
+        if uploaded_file:
+            text = extract_text_from_docx(uploaded_file)
+            st.text_area("📜 RFP Text Extracted", text, height=300)
 
-        if st.button("📄 Generate Labor Estimation Summary"):
-            proj_type = extract_project_type(text)
-            if proj_type:
-                df_roles = fetch_roles_by_project_type(proj_type)
-                if not df_roles.empty:
-                    total_cost = df_roles["total_cost"].sum()
-                    doc = Document()
-                    doc.add_heading("Proposal Summary", 0)
-                    doc.add_paragraph(f"Detected Project Type: {proj_type.title()}")
-                    doc.add_heading("Labor Cost Estimation", level=1)
+            if st.button("📄 Generate Labor Estimation Summary"):
+                proj_type = extract_project_type(text)
+                if proj_type:
+                    df_roles = fetch_roles_by_project_type(proj_type)
+                    if not df_roles.empty:
+                        total_cost = df_roles["total_cost"].sum()
+                        doc = Document()
+                        doc.add_heading("Proposal Summary", 0)
+                        doc.add_paragraph(f"Detected Project Type: {proj_type.title()}")
+                        doc.add_heading("Labor Cost Estimation", level=1)
 
-                    table = doc.add_table(rows=1, cols=5)
-                    table.style = 'Table Grid'
-                    headers = ["Role", "Count", "Duration", "Rate", "Total Cost"]
-                    for i, h in enumerate(headers):
-                        table.rows[0].cells[i].text = h
+                        table = doc.add_table(rows=1, cols=5)
+                        table.style = 'Table Grid'
+                        headers = ["Role", "Count", "Duration", "Rate", "Total Cost"]
+                        for i, h in enumerate(headers):
+                            table.rows[0].cells[i].text = h
 
-                    for _, row in df_roles.iterrows():
-                        row_cells = table.add_row().cells
-                        row_cells[0].text = row["role"]
-                        row_cells[1].text = str(row["count"])
-                        row_cells[2].text = str(row["duration_days"])
-                        row_cells[3].text = f"${row['daily_rate']}"
-                        row_cells[4].text = f"${row['total_cost']:,.2f}"
+                        for _, row in df_roles.iterrows():
+                            row_cells = table.add_row().cells
+                            row_cells[0].text = row["role"]
+                            row_cells[1].text = str(row["count"])
+                            row_cells[2].text = str(row["duration_days"])
+                            row_cells[3].text = f"${row['daily_rate']}"
+                            row_cells[4].text = f"${row['total_cost']:,.2f}"
 
-                    doc.add_paragraph(f"\nEstimated Total Labor Cost: ${total_cost:,.2f}")
-                    buffer = BytesIO()
-                    doc.save(buffer)
-                    buffer.seek(0)
+                        doc.add_paragraph(f"\nEstimated Total Labor Cost: ${total_cost:,.2f}")
+                        buffer = BytesIO()
+                        doc.save(buffer)
+                        buffer.seek(0)
 
-                    st.download_button(
-                        label="⬇️ Download DOCX Summary",
-                        data=buffer,
-                        file_name="proposal_summary.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
+                        st.download_button(
+                            label="⬇️ Download DOCX Summary",
+                            data=buffer,
+                            file_name="proposal_summary.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        )
+                    else:
+                        st.warning("⚠️ No labor roles found for this project type.")
                 else:
-                    st.warning("⚠️ No labor roles found for this project type.")
-            else:
-                st.error("⚠️ Could not determine project type from the RFP document.")
+                    st.error("⚠️ Could not determine project type from the RFP document.")
 
 
 
