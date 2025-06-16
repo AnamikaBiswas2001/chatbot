@@ -4,6 +4,8 @@ import snowflake.connector
 from docx import Document
 from io import BytesIO
 import difflib
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 # ----------------- Streamlit Config -----------------
 st.set_page_config(page_title="RFP Chat Assistant", layout="wide")
@@ -22,7 +24,7 @@ def load_keywords_from_snowflake():
             schema=st.secrets["snowflake"]["schema"]
         )
         df = pd.read_sql("SELECT DISTINCT task_keyword FROM standard_task_roles", conn)
-        return df["TASK_KEYWORD"].str.lower().tolist()
+        return df["TASK_KEYWORD"].dropna().str.lower().tolist()
     except Exception as e:
         st.error(f"Failed to load keywords: {e}")
         return []
@@ -31,9 +33,14 @@ def extract_text_from_docx(file):
     doc = Document(file)
     return "\n".join([para.text for para in doc.paragraphs])
 
-def extract_keyword(text, keyword_list):
-    matches = difflib.get_close_matches(text.lower(), keyword_list, n=1, cutoff=0.3)
-    return matches[0] if matches else None
+def extract_semantic_keyword(text, keyword_list):
+    keyword_list = [kw.lower() for kw in keyword_list]
+    corpus = keyword_list + [text.lower()]
+    vectorizer = TfidfVectorizer().fit(corpus)
+    vectors = vectorizer.transform(corpus)
+    sim_scores = cosine_similarity(vectors[-1], vectors[:-1]).flatten()
+    best_idx = sim_scores.argmax()
+    return keyword_list[best_idx] if sim_scores[best_idx] > 0.2 else None
 
 def fetch_roles_for_keyword(keyword):
     try:
@@ -59,59 +66,50 @@ def fetch_roles_for_keyword(keyword):
         st.error(f"❌ Failed to fetch roles: {e}")
         return pd.DataFrame()
 
-def generate_proposal_summary(project_type, df_roles):
-    total_cost = df_roles["total_cost"].sum()
-    doc = Document()
-    doc.add_heading("Proposal Summary", 0)
-    doc.add_paragraph(f"Detected Project Type: {project_type.title()}")
-    doc.add_heading("Labor Cost Estimation", level=1)
+def display_estimate(df):
+    st.markdown("### 📊 Estimated Labor Cost")
+    st.dataframe(df[["role", "count", "duration_days", "daily_rate", "total_cost"]])
+    st.success(f"💰 Total Estimated Cost: ${df['total_cost'].sum():,.2f}")
 
-    table = doc.add_table(rows=1, cols=5)
-    table.style = 'Table Grid'
-    headers = ["Role", "Count", "Duration", "Rate", "Total Cost"]
-    for i, h in enumerate(headers):
-        table.rows[0].cells[i].text = h
-
-    for _, row in df_roles.iterrows():
-        row_cells = table.add_row().cells
-        row_cells[0].text = row["role"]
-        row_cells[1].text = str(row["count"])
-        row_cells[2].text = str(row["duration_days"])
-        row_cells[3].text = f"${row['daily_rate']}"
-        row_cells[4].text = f"${row['total_cost']:,.2f}"
-
-    doc.add_paragraph(f"\nEstimated Total Labor Cost: ${total_cost:,.2f}")
-    return doc
+@st.cache_data(ttl=600)
+def load_faq_from_snowflake():
+    try:
+        conn = snowflake.connector.connect(
+            user=st.secrets["snowflake"]["user"],
+            password=st.secrets["snowflake"]["password"],
+            account=st.secrets["snowflake"]["account"],
+            warehouse=st.secrets["snowflake"]["warehouse"],
+            database=st.secrets["snowflake"]["database"],
+            schema=st.secrets["snowflake"]["schema"]
+        )
+        cursor = conn.cursor()
+        cursor.execute("SELECT question, answer FROM chatbot_faq")
+        data = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return pd.DataFrame(data, columns=["question", "answer"])
+    except Exception as e:
+        st.error(f"Failed to load chatbot FAQ: {e}")
+        return pd.DataFrame(columns=["question", "answer"])
 
 # ----------------- UI: Text or File Input -----------------
 keywords = load_keywords_from_snowflake()
+faq_df = load_faq_from_snowflake()
+
 tab1, tab2 = st.tabs(["💬 Chat Query", "📄 Upload DOCX"])
 
 with tab1:
     user_input = st.text_input("Enter project-related question or task description:")
     if user_input:
-        keyword = extract_keyword(user_input, keywords)
+        keyword = extract_semantic_keyword(user_input, keywords)
+
         if keyword:
             df_roles = fetch_roles_for_keyword(keyword)
             if not df_roles.empty:
-                st.markdown(f"### 📊 Estimated Labor Cost for '{keyword.title()}' Project")
-                st.dataframe(df_roles[["role", "count", "duration_days", "daily_rate", "total_cost"]])
-                st.success(f"💰 Total Estimated Cost: ${df_roles['total_cost'].sum():,.2f}")
-                if st.button("📄 Generate DOCX Summary"):
-                    doc = generate_proposal_summary(keyword, df_roles)
-                    buffer = BytesIO()
-                    doc.save(buffer)
-                    buffer.seek(0)
-                    st.download_button(
-                        label="⬇️ Download DOCX Summary",
-                        data=buffer,
-                        file_name="proposal_summary.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
+                display_estimate(df_roles)
             else:
                 st.warning("No matching labor roles found.")
         else:
-            faq_df = load_faq_from_snowflake()
             matches = difflib.get_close_matches(user_input.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
             if matches:
                 match = matches[0]
@@ -125,24 +123,11 @@ with tab2:
     if doc_file:
         text = extract_text_from_docx(doc_file)
         st.text_area("📜 Extracted RFP Text", text, height=250)
-        keyword = extract_keyword(text, keywords)
+        keyword = extract_semantic_keyword(text, keywords)
         if keyword:
             df_roles = fetch_roles_for_keyword(keyword)
             if not df_roles.empty:
-                st.markdown(f"### 📊 Estimated Labor Cost for '{keyword.title()}' Project")
-                st.dataframe(df_roles[["role", "count", "duration_days", "daily_rate", "total_cost"]])
-                st.success(f"💰 Total Estimated Cost: ${df_roles['total_cost'].sum():,.2f}")
-                if st.button("📄 Generate DOCX Summary"):
-                    doc = generate_proposal_summary(keyword, df_roles)
-                    buffer = BytesIO()
-                    doc.save(buffer)
-                    buffer.seek(0)
-                    st.download_button(
-                        label="⬇️ Download DOCX Summary",
-                        data=buffer,
-                        file_name="proposal_summary.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
+                display_estimate(df_roles)
             else:
                 st.warning("No roles found in the database for the detected keyword.")
         else:
