@@ -101,6 +101,7 @@ with st.sidebar:
                 proj_type = extract_project_type(text)
                 if proj_type:
                     df_roles = fetch_roles_by_project_type(proj_type)
+                    print(df_roles)
                     if not df_roles.empty:
                         total_cost = df_roles["total_cost"].sum()
                         doc = Document()
