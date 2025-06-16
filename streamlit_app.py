@@ -33,7 +33,15 @@ def extract_text_from_docx(file):
     doc = Document(file)
     return "\n".join([para.text for para in doc.paragraphs])
 
-def extract_semantic_keyword(text, keyword_list):
+def extract_project_type(text, keyword_list):
+    # Step 1: Try explicit pattern match like "Project Type: Exploration"
+    match = re.search(r"Project Type:\s*(\w+)", text, re.IGNORECASE)
+    if match:
+        explicit_type = match.group(1).lower()
+        if explicit_type in keyword_list:
+            return explicit_type
+
+    # Step 2: Fallback to semantic similarity
     keyword_list = [kw.lower() for kw in keyword_list]
     corpus = keyword_list + [text.lower()]
     vectorizer = TfidfVectorizer().fit(corpus)
@@ -41,6 +49,7 @@ def extract_semantic_keyword(text, keyword_list):
     sim_scores = cosine_similarity(vectors[-1], vectors[:-1]).flatten()
     best_idx = sim_scores.argmax()
     return keyword_list[best_idx] if sim_scores[best_idx] > 0.2 else None
+
 
 def fetch_roles_for_keyword(keyword):
     try:
@@ -101,7 +110,7 @@ tab1, tab2 = st.tabs(["💬 Chat Query", "📄 Upload DOCX"])
 with tab1:
     user_input = st.text_input("Enter project-related question or task description:")
     if user_input:
-        keyword = extract_semantic_keyword(user_input, keywords)
+        keyword = extract_project_type(user_input, keywords)
 
         if keyword:
             df_roles = fetch_roles_for_keyword(keyword)
@@ -123,7 +132,7 @@ with tab2:
     if doc_file:
         text = extract_text_from_docx(doc_file)
         st.text_area("📜 Extracted RFP Text", text, height=250)
-        keyword = extract_semantic_keyword(text, keywords)
+        keyword = extract_project_type(text, keywords)
         if keyword:
             df_roles = fetch_roles_for_keyword(keyword)
             if not df_roles.empty:
