@@ -5,6 +5,7 @@ from docx import Document
 from io import BytesIO
 import difflib
 import re
+import numpy as np
 import json
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -80,6 +81,11 @@ def fetch_roles_for_keyword(keyword):
         st.error(f"❌ Failed to fetch roles: {e}")
         return pd.DataFrame()
 
+def display_estimate(df):
+    st.markdown("### 📊 Estimated Labor Cost")
+    st.dataframe(df[["role", "count", "duration_days", "daily_rate", "total_cost"]])
+    st.success(f"💰 Total Estimated Cost: ${df['total_cost'].sum():,.2f}")
+
 def extract_proposal_requirements(text):
     match = re.search(r"Proposal Requirements:\s*(.*?)\s*(Submission Deadline:|Contact for Clarifications:|$)", text, re.DOTALL | re.IGNORECASE)
     if match:
@@ -97,50 +103,33 @@ def extract_project_info(text):
             info[field] = match.group(1).strip()
     return info
 
-def save_estimation_history(project_title, roles_df):
+def convert_df_for_json_storage(df):
+    return json.dumps([
+        {k: (int(v) if isinstance(v, (np.integer,)) else v) for k, v in row.items()}
+        for row in df.to_dict(orient="records")
+    ])
+
+def save_estimation_to_history(project_title, total_cost, roles_df):
     try:
         conn = snowflake.connector.connect(**st.secrets["snowflake"])
         cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS estimation_history (
-                id INT AUTOINCREMENT PRIMARY KEY,
-                project_title STRING,
-                estimation_data STRING,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        json_data = json.dumps(roles_df.to_dict(orient="records"))
-        cursor.execute("INSERT INTO estimation_history (project_title, estimation_data) VALUES (%s, %s)", (project_title, json_data))
+        details_json = convert_df_for_json_storage(roles_df)
+        insert_sql = """
+            INSERT INTO rfp_estimation_history (project_title, estimated_cost, details_json, timestamp)
+            VALUES (%s, %s, PARSE_JSON(%s), CURRENT_TIMESTAMP)
+        """
+        cursor.execute(insert_sql, (project_title, float(total_cost), details_json))
         cursor.close()
+        conn.close()
     except Exception as e:
         st.warning(f"⚠️ Failed to save estimation history: {e}")
 
-def display_estimate(df):
-    st.markdown("### 📊 Estimated Labor Cost")
-    st.dataframe(df[["role", "count", "duration_days", "daily_rate", "total_cost"]])
-    st.success(f"💰 Total Estimated Cost: ${df['total_cost'].sum():,.2f}")
-
-
-def view_estimation_history():
-    try:
-        conn = snowflake.connector.connect(**st.secrets["snowflake"])
-        df = pd.read_sql("SELECT project_title, estimation_data, created_at FROM estimation_history ORDER BY created_at DESC", conn)
-        for _, row in df.iterrows():
-            st.markdown(f"### 📁 {row['project_title']}")
-            st.caption(f"🕒 {row['created_at']}")
-            data = pd.DataFrame(json.loads(row["estimation_data"]))
-            display_estimate(data)
-            st.divider()
-    except Exception as e:
-        st.error(f"❌ Failed to load history: {e}")
-
-# ----------------- Tabs -----------------
 keywords = load_keywords_from_snowflake()
 faq_df = load_faq_from_snowflake()
 
-tab1, tab2, tab3 = st.tabs(["💬 Chat Query", "📄 Upload DOCX", "📜 History"])
+page = st.sidebar.radio("Navigate", ["💬 Chat", "📄 Upload RFP", "📚 Estimation History"])
 
-with tab1:
+if page == "💬 Chat":
     user_input = st.text_input("Enter project-related question or task description:")
     if user_input:
         keyword = extract_semantic_keyword(user_input, keywords)
@@ -148,6 +137,7 @@ with tab1:
             df_roles = fetch_roles_for_keyword(keyword)
             if not df_roles.empty:
                 display_estimate(df_roles)
+                save_estimation_to_history(keyword.title(), df_roles["total_cost"].sum(), df_roles)
             else:
                 st.warning("No matching labor roles found.")
         else:
@@ -158,7 +148,7 @@ with tab1:
             else:
                 st.warning("Sorry, I couldn't understand that question.")
 
-with tab2:
+elif page == "📄 Upload RFP":
     doc_file = st.file_uploader("Upload a DOCX RFP file", type=["docx"])
     if doc_file:
         text = extract_text_from_docx(doc_file)
@@ -179,6 +169,8 @@ with tab2:
                 st.markdown(f"**{k}:** {v}")
 
             display_estimate(df_roles)
+            save_estimation_to_history(project_info.get("Project Title", "Uploaded RFP"), df_roles["total_cost"].sum(), df_roles)
+
             st.markdown("### 📝 Responses to Proposal Requirements")
             reqs = extract_proposal_requirements(text)
             for req in reqs:
@@ -233,10 +225,17 @@ with tab2:
                     file_name="proposal_summary.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
+        else:
+            st.warning("Could not detect any labor roles in the document.")
 
-            if project_info.get("Project Title"):
-                save_estimation_history(project_info["Project Title"], df_roles)
-
-with tab3:
-    st.header("📜 Estimation History")
-    view_estimation_history()
+elif page == "📚 Estimation History":
+    try:
+        conn = snowflake.connector.connect(**st.secrets["snowflake"])
+        df_hist = pd.read_sql("SELECT * FROM rfp_estimation_history ORDER BY timestamp DESC", conn)
+        st.subheader("📚 Past Estimations")
+        if not df_hist.empty:
+            st.dataframe(df_hist[["project_title", "estimated_cost", "timestamp"]])
+        else:
+            st.info("No historical data available.")
+    except Exception as e:
+        st.warning(f"⚠️ Failed to load estimation history: {e}")
