@@ -81,22 +81,23 @@ def fetch_roles_for_keyword(keyword):
         st.error(f"❌ Failed to fetch roles: {e}")
         return pd.DataFrame()
 
-def save_estimation_to_history(project_title, total_cost, df_roles):
+def save_estimation_to_history(project_title, total_cost, df_roles, question=None):
     try:
         conn = snowflake.connector.connect(**st.secrets["snowflake"])
         cursor = conn.cursor()
         json_roles = json.dumps(df_roles.to_dict(orient="records"))
         current_time = datetime.utcnow()
-        query = f"""
-            INSERT INTO rfp_estimation_history (project_title, total_cost, roles,timestamp)
-            VALUES (%s, %s, %s, %s)
+        query = """
+            INSERT INTO rfp_estimation_history (project_title, total_cost, roles, timestamp, question)
+            VALUES (%s, %s, %s, %s, %s)
         """
-        cursor.execute(query, (project_title, float(total_cost), json_roles,current_time))
+        cursor.execute(query, (project_title, float(total_cost), json_roles, current_time, question))
         conn.commit()
         cursor.close()
         conn.close()
     except Exception as e:
         st.warning(f"⚠️ Failed to save estimation history: {e}")
+
 
 def display_estimate(df):
     st.markdown("### 📊 Estimated Labor Cost")
@@ -135,7 +136,8 @@ with tabs[0]:
             df_roles = fetch_roles_for_keyword(keyword)
             if not df_roles.empty:
                 total = display_estimate(df_roles)
-                save_estimation_to_history("Chat Query", total, df_roles)
+                save_estimation_to_history("Chat Query", total, df_roles, question=user_input)
+
             else:
                 st.warning("No matching labor roles found.")
         else:
@@ -167,7 +169,8 @@ with tabs[1]:
                 st.markdown(f"**{k}:** {v}")
 
             total = display_estimate(df_roles)
-            save_estimation_to_history(project_info.get("Project Title", "Untitled RFP"), total, df_roles)
+            save_estimation_to_history(project_info.get("Project Title", "Untitled RFP"), total, df_roles, question=text)
+
 
             st.markdown("### 📝 Responses to Proposal Requirements")
             reqs = extract_proposal_requirements(text)
@@ -185,14 +188,17 @@ with tabs[1]:
 with tabs[2]:
     try:
         conn = snowflake.connector.connect(**st.secrets["snowflake"])
-        history_df = pd.read_sql("SELECT project_title, total_cost, roles FROM rfp_estimation_history ORDER BY timestamp DESC", conn)
+        history_df = pd.read_sql("SELECT project_title, total_cost, roles, question, timestamp FROM rfp_estimation_history ORDER BY timestamp DESC", conn)
+
         if not history_df.empty:
             st.markdown("### 📚 Past Estimations")
             for _, row in history_df.iterrows():
-                st.markdown(f"**Project:** {row['PROJECT_TITLE']} | **Total:** ${row['TOTAL_COST']:,.2f}")
-                with st.expander("View Roles"):
+                st.markdown(f"**🗂 Project:** {row['PROJECT_TITLE']} | **💬 Query:** `{row['QUESTION'][:100]}`")
+                st.markdown(f"**💰 Total Estimated Cost:** ${row['TOTAL_COST']:,.2f} | 🕒 {row['TIMESTAMP']}")
+                with st.expander("📋 View Roles"):
                     roles_df = pd.DataFrame(json.loads(row["ROLES"]))
                     st.dataframe(roles_df)
+
         else:
             st.info("No history found.")
     except Exception as e:
