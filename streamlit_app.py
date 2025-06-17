@@ -13,6 +13,15 @@ from sklearn.metrics.pairwise import cosine_similarity
 st.set_page_config(page_title="RFP Chat Assistant", layout="wide")
 st.title("🤖 AI Chat Assistant for RFP Labor Estimation")
 
+# ----------------- Session Initialization -----------------
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "last_tab" not in st.session_state:
+    st.session_state.last_tab = "💬 Chat Query"
+if "doc_text" not in st.session_state:
+    st.session_state.doc_text = ""
+
+# ----------------- Data Loaders -----------------
 @st.cache_data(ttl=600)
 def load_keywords_from_snowflake():
     try:
@@ -37,6 +46,7 @@ def load_faq_from_snowflake():
         st.error(f"Failed to load chatbot FAQ: {e}")
         return pd.DataFrame(columns=["question", "answer"])
 
+# ----------------- Text & Data Extraction -----------------
 def extract_text_from_docx(file):
     doc = Document(file)
     return "\n".join([para.text for para in doc.paragraphs])
@@ -81,23 +91,22 @@ def fetch_roles_for_keyword(keyword):
         st.error(f"❌ Failed to fetch roles: {e}")
         return pd.DataFrame()
 
-def save_estimation_to_history(project_title, total_cost, df_roles, question=None):
+def save_estimation_to_history(project_title, total_cost, df_roles, source):
     try:
         conn = snowflake.connector.connect(**st.secrets["snowflake"])
         cursor = conn.cursor()
         json_roles = json.dumps(df_roles.to_dict(orient="records"))
         current_time = datetime.utcnow()
-        query = """
-            INSERT INTO rfp_estimation_history (project_title, total_cost, roles, timestamp, question)
+        query = f"""
+            INSERT INTO rfp_estimation_history (project_title, total_cost, roles, timestamp, source)
             VALUES (%s, %s, %s, %s, %s)
         """
-        cursor.execute(query, (project_title, float(total_cost), json_roles, current_time, question))
+        cursor.execute(query, (project_title, float(total_cost), json_roles, current_time, source))
         conn.commit()
         cursor.close()
         conn.close()
     except Exception as e:
         st.warning(f"⚠️ Failed to save estimation history: {e}")
-
 
 def display_estimate(df):
     st.markdown("### 📊 Estimated Labor Cost")
@@ -123,78 +132,64 @@ def extract_project_info(text):
             info[field] = match.group(1).strip()
     return info
 
+# ----------------- App Interface -----------------
 keywords = load_keywords_from_snowflake()
 faq_df = load_faq_from_snowflake()
-
 tabs = st.tabs(["💬 Chat Query", "📄 Upload DOCX", "📚 Estimation History"])
+current_tab = tabs[0] if st.session_state.last_tab == "💬 Chat Query" else (tabs[1] if st.session_state.last_tab == "📄 Upload DOCX" else tabs[2])
 
+# Clear input if tab changed
+if st.session_state.last_tab != st.selectbox("Select Tab", ["💬 Chat Query", "📄 Upload DOCX", "📚 Estimation History"], index=["💬 Chat Query", "📄 Upload DOCX", "📚 Estimation History"].index(st.session_state.last_tab)):
+    st.session_state.user_input = ""
+    st.session_state.doc_text = ""
+st.session_state.last_tab = st.selectbox("Select Tab", ["💬 Chat Query", "📄 Upload DOCX", "📚 Estimation History"], index=["💬 Chat Query", "📄 Upload DOCX", "📚 Estimation History"].index(st.session_state.last_tab))
+
+# --- Chat Tab ---
 with tabs[0]:
-    st.subheader("💬 Chat Assistant")
-
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-
-    user_input = st.chat_input("Ask a project-related question or describe your RFP task...")
-
+    user_input = st.text_input("Enter project-related question or task description:", key="user_input")
     if user_input:
-        # Display user message
-        st.chat_message("user").write(user_input)
-
         keyword = extract_semantic_keyword(user_input, keywords)
-        response = ""
-
         if keyword:
             df_roles = fetch_roles_for_keyword(keyword)
             if not df_roles.empty:
-                total = df_roles["total_cost"].sum()
-                response = f"### 📊 Estimated Labor Cost\n"
-                response += df_roles[["role", "count", "duration_days", "daily_rate", "total_cost"]].to_markdown(index=False)
-                response += f"\n\n💰 **Total Estimated Cost:** ${total:,.2f}"
-                save_estimation_to_history("Chat Query", total, df_roles, question=user_input)
+                total = display_estimate(df_roles)
+                save_estimation_to_history("Chat Query", total, df_roles, source="chat")
+                st.session_state.chat_history.append({"user": user_input, "assistant": f"Estimated cost: ${total:,.2f}"})
             else:
-                response = "⚠️ No matching labor roles found in the database."
+                st.warning("No matching labor roles found.")
         else:
             matches = difflib.get_close_matches(user_input.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
             if matches:
                 response = faq_df.loc[faq_df["question"].str.lower() == matches[0], "answer"].values[0]
+                st.session_state.chat_history.append({"user": user_input, "assistant": response})
+                st.markdown(f"**Answer:** {response}")
             else:
-                response = "❓ Sorry, I couldn't understand that question."
+                st.warning("Sorry, I couldn't understand that question.")
+    for chat in st.session_state.chat_history:
+        st.markdown(f"**You:** {chat['user']}")
+        st.markdown(f"**Assistant:** {chat['assistant']}")
 
-        # Show assistant message
-        st.chat_message("assistant").markdown(response)
-
-        # Save to session history
-        st.session_state.chat_history.append({"role": "user", "text": user_input})
-        st.session_state.chat_history.append({"role": "assistant", "text": response})
-
-
+# --- Document Tab ---
 with tabs[1]:
     doc_file = st.file_uploader("Upload a DOCX RFP file", type=["docx"])
     if doc_file:
         text = extract_text_from_docx(doc_file)
+        st.session_state.doc_text = text
         st.text_area("📜 Extracted RFP Text", text, height=250)
 
         project_info = extract_project_info(text)
         structured_df = extract_structured_roles(text)
-
-        if structured_df.empty:
-            keyword = extract_semantic_keyword(text, keywords)
-            df_roles = fetch_roles_for_keyword(keyword) if keyword else pd.DataFrame()
-        else:
-            df_roles = structured_df
+        df_roles = structured_df if not structured_df.empty else fetch_roles_for_keyword(extract_semantic_keyword(text, keywords))
 
         if not df_roles.empty:
             st.subheader("📋 Project Information")
             for k, v in project_info.items():
                 st.markdown(f"**{k}:** {v}")
-
             total = display_estimate(df_roles)
-            save_estimation_to_history(project_info.get("Project Title", "Untitled RFP"), total, df_roles, question=text)
-
+            save_estimation_to_history(project_info.get("Project Title", "Untitled RFP"), total, df_roles, source="document")
 
             st.markdown("### 📝 Responses to Proposal Requirements")
-            reqs = extract_proposal_requirements(text)
-            for req in reqs:
+            for req in extract_proposal_requirements(text):
                 st.markdown(f"**• {req}**")
                 match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
                 if match:
@@ -205,20 +200,19 @@ with tabs[1]:
         else:
             st.warning("Could not detect any labor roles in the document.")
 
+# --- History Tab ---
 with tabs[2]:
     try:
         conn = snowflake.connector.connect(**st.secrets["snowflake"])
-        history_df = pd.read_sql("SELECT project_title, total_cost, roles, question, timestamp FROM rfp_estimation_history ORDER BY timestamp DESC", conn)
+        history_df = pd.read_sql("SELECT project_title, total_cost, roles, source, timestamp FROM rfp_estimation_history ORDER BY timestamp DESC", conn)
         if not history_df.empty:
             st.markdown("### 📚 Past Estimations")
             for _, row in history_df.iterrows():
-                st.markdown(f"**Project:** {row['PROJECT_TITLE']} | **Total Cost:** ${row['TOTAL_COST']:,.2f} | ⏱️ {row['TIMESTAMP']}")
-                if row["QUESTION"]:
-                    st.markdown(f"**💬 Chat Query:** _{row['QUESTION']}_")
-                with st.expander("📋 View Roles"):
+                st.markdown(f"**Project:** {row['PROJECT_TITLE']} | **Total:** ${row['TOTAL_COST']:,.2f} | **Source:** {row['SOURCE']} | **Timestamp:** {row['TIMESTAMP']}")
+                with st.expander("View Roles"):
                     roles_df = pd.DataFrame(json.loads(row["ROLES"]))
                     st.dataframe(roles_df)
         else:
-            st.info("No estimation history found.")
+            st.info("No history found.")
     except Exception as e:
-        st.warning(f"⚠️ Failed to load estimation history: {e}")
+        st.warning(f"⚠️ Failed to load history: {e}")
