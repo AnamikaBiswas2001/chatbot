@@ -142,6 +142,49 @@ def extract_project_info(text):
 
     return info
 
+def generate_summary_doc(project_info, roles_df, requirements_responses):
+    doc = Document()
+    doc.add_heading("RFP Proposal Summary", 0)
+
+    # Project Info
+    doc.add_heading("📋 Project Information", level=1)
+    for key, value in project_info.items():
+        if value:
+            doc.add_paragraph(f"{key}: {value}")
+
+    # Labor Estimation Table
+    if not roles_df.empty:
+        doc.add_heading("📊 Estimated Labor Cost", level=1)
+        table = doc.add_table(rows=1, cols=5)
+        table.style = "Table Grid"
+        hdr_cells = table.rows[0].cells
+        headers = ["Role", "Count", "Duration", "Rate", "Total Cost"]
+        for i, h in enumerate(headers):
+            hdr_cells[i].text = h
+        for _, row in roles_df.iterrows():
+            cells = table.add_row().cells
+            cells[0].text = row["role"]
+            cells[1].text = str(row["count"])
+            cells[2].text = str(row["duration_days"])
+            cells[3].text = f"${row['daily_rate']}"
+            cells[4].text = f"${row['total_cost']:,.2f}"
+
+        total = roles_df["total_cost"].sum()
+        doc.add_paragraph(f"\n💰 **Total Estimated Labor Cost**: ${total:,.2f}")
+
+    # Proposal Requirements Responses
+    if requirements_responses:
+        doc.add_heading("📌 Proposal Requirements & Responses", level=1)
+        for req, res in requirements_responses.items():
+            doc.add_paragraph(f"• {req}", style="List Bullet")
+            doc.add_paragraph(res, style="Intense Quote")
+
+    # Prepare for download
+    buffer = BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer
+
 
 
 
@@ -186,26 +229,39 @@ with tab2:
 
 
         keyword = extract_semantic_keyword(text, keywords)
+                # Only generate download if roles found
         if keyword:
             df_roles = fetch_roles_for_keyword(keyword)
             if not df_roles.empty:
                 display_estimate(df_roles)
 
-                st.markdown("---")
+                # Extract requirements + responses
                 st.markdown("### 📝 Responses to Proposal Requirements")
                 requirements = extract_proposal_requirements(text)
-                if requirements:
-                    st.subheader("📌 Proposal Requirements & Responses")
-                    for req in requirements:
-                        st.markdown(f"**• {req}**")
-                        match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
-                        if match:
-                            answer = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
-                            st.markdown(f"✅ {answer}")
-                        else:
-                            st.markdown("❓ This requirement will be addressed in the proposal.")
+                requirements_responses = {}
+                for req in requirements:
+                    match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
+                    if match:
+                        answer = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
+                    else:
+                        answer = "This requirement will be addressed in the proposal."
+                    requirements_responses[req] = answer
+                    st.markdown(f"**• {req}**")
+                    st.markdown(answer)
 
+                # ⬇️ Generate Download Button
+                st.markdown("---")
+                buffer = generate_summary_doc(project_info, df_roles, requirements_responses)
+                st.download_button(
+                    label="⬇️ Download Proposal Summary (DOCX)",
+                    data=buffer,
+                    file_name="proposal_summary.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
             else:
                 st.warning("No roles found in the database for the detected keyword.")
         else:
             st.warning("Could not detect project keyword from the document.")
+
+
+    
