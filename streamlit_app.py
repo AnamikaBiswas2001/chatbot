@@ -6,6 +6,7 @@ from io import BytesIO
 import difflib
 import re
 import json
+from datetime import datetime
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -85,11 +86,12 @@ def save_estimation_to_history(project_title, total_cost, df_roles):
         conn = snowflake.connector.connect(**st.secrets["snowflake"])
         cursor = conn.cursor()
         json_roles = json.dumps(df_roles.to_dict(orient="records"))
+        current_time = datetime.utcnow()
         query = f"""
-            INSERT INTO rfp_estimation_history (project_title, total_cost, roles)
-            VALUES (%s, %s, %s)
+            INSERT INTO rfp_estimation_history (project_title, total_cost, roles,timestamp)
+            VALUES (%s, %s, %s, %s)
         """
-        cursor.execute(query, (project_title, float(total_cost), json_roles))
+        cursor.execute(query, (project_title, float(total_cost), json_roles,current_time))
         conn.commit()
         cursor.close()
         conn.close()
@@ -183,7 +185,7 @@ with tabs[1]:
 with tabs[2]:
     try:
         conn = snowflake.connector.connect(**st.secrets["snowflake"])
-        history_df = pd.read_sql("SELECT project_title, total_cost, roles FROM rfp_estimation_history ORDER BY created_at DESC", conn)
+        history_df = pd.read_sql("SELECT project_title, total_cost, roles FROM rfp_estimation_history ORDER BY timestamp DESC", conn)
         if not history_df.empty:
             st.markdown("### 📚 Past Estimations")
             for _, row in history_df.iterrows():
