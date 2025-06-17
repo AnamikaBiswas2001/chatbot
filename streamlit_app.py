@@ -101,10 +101,39 @@ def extract_project_info(text):
             info[field] = match.group(1).strip()
     return info
 
+import uuid
+from datetime import datetime
+import json
+
+def save_estimation_history(project_title, keyword, source, df_roles):
+    try:
+        conn = snowflake.connector.connect(**st.secrets["snowflake"])
+        cursor = conn.cursor()
+
+        record = (
+            str(uuid.uuid4()),
+            datetime.now(),
+            project_title,
+            keyword,
+            source,
+            json.dumps(df_roles.to_dict(orient="records")),
+            float(df_roles["total_cost"].sum())
+        )
+        cursor.execute("""
+            INSERT INTO rfp_estimation_history 
+            (id, timestamp, project_title, keyword, source, roles, total_cost)
+            VALUES (%s, %s, %s, %s, %s, PARSE_JSON(%s), %s)
+        """, record)
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        st.error(f"⚠️ Failed to save estimation history: {e}")
+
+
 keywords = load_keywords_from_snowflake()
 faq_df = load_faq_from_snowflake()
 
-tab1, tab2 = st.tabs(["💬 Chat Query", "📄 Upload DOCX"])
+tab1, tab2, tab3 = st.tabs(["💬 Chat Query", "📄 Upload DOCX"],"View History")
 
 with tab1:
     user_input = st.text_input("Enter project-related question or task description:")
@@ -201,3 +230,13 @@ with tab2:
                 )
         else:
             st.warning("Could not detect any labor roles in the document.")
+
+with tab3:
+    st.title("📜 Estimation History")
+    try:
+        conn = snowflake.connector.connect(**st.secrets["snowflake"])
+        df_history = pd.read_sql("SELECT * FROM rfp_estimation_history ORDER BY timestamp DESC", conn)
+        st.dataframe(df_history)
+    except Exception as e:
+        st.error(f"Failed to load history: {e}")
+
