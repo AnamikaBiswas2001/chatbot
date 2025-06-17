@@ -133,7 +133,7 @@ def save_estimation_history(project_title, keyword, source, df_roles):
 keywords = load_keywords_from_snowflake()
 faq_df = load_faq_from_snowflake()
 
-tab1, tab2, tab3 = st.tabs(["💬 Chat Query", "📄 Upload DOCX"],"View History")
+tab1, tab2, tab3 = st.tabs(["💬 Chat Query", "📄 Upload DOCX","View History"])
 
 with tab1:
     user_input = st.text_input("Enter project-related question or task description:")
