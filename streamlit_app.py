@@ -98,8 +98,6 @@ def save_estimation_to_history(project_title, total_cost, df_roles, question="")
     except Exception as e:
         st.warning(f"⚠️ Failed to save estimation history: {e}")
 
-
-
 def display_estimate(df):
     st.markdown("### 📊 Estimated Labor Cost")
     st.dataframe(df[["role", "count", "duration_days", "daily_rate", "total_cost"]])
@@ -124,24 +122,28 @@ def extract_project_info(text):
             info[field] = match.group(1).strip()
     return info
 
-keywords = load_keywords_from_snowflake()
-faq_df = load_faq_from_snowflake()
+if "last_tab" not in st.session_state:
+    st.session_state.last_tab = "💬 Chat Query"
+    st.session_state.chat_input_text = ""
 
 tabs = st.tabs(["💬 Chat Query", "📄 Upload DOCX", "📚 Estimation History"])
 
+current_tab = "💬 Chat Query" if tabs[0] else ""
+if current_tab != st.session_state.last_tab:
+    st.session_state.chat_input_text = ""
+    st.session_state.last_tab = current_tab
+
 with tabs[0]:
     st.subheader("💬 Chat Assistant")
-
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
 
-    user_input = st.chat_input("Ask a project-related question or describe your RFP task...")
+    user_input = st.chat_input("Ask a project-related question or describe your RFP task...", key="chat_input_text")
 
     if user_input:
-        # Display user message
         st.chat_message("user").write(user_input)
 
-        keyword = extract_semantic_keyword(user_input, keywords)
+        keyword = extract_semantic_keyword(user_input, load_keywords_from_snowflake())
         response = ""
 
         if keyword:
@@ -155,19 +157,15 @@ with tabs[0]:
             else:
                 response = "⚠️ No matching labor roles found in the database."
         else:
-            matches = difflib.get_close_matches(user_input.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
+            matches = difflib.get_close_matches(user_input.lower(), load_faq_from_snowflake()["question"].str.lower(), n=1, cutoff=0.4)
             if matches:
-                response = faq_df.loc[faq_df["question"].str.lower() == matches[0], "answer"].values[0]
+                response = load_faq_from_snowflake().loc[load_faq_from_snowflake()["question"].str.lower() == matches[0], "answer"].values[0]
             else:
                 response = "❓ Sorry, I couldn't understand that question."
 
-        # Show assistant message
         st.chat_message("assistant").markdown(response)
-
-        # Save to session history
         st.session_state.chat_history.append({"role": "user", "text": user_input})
         st.session_state.chat_history.append({"role": "assistant", "text": response})
-
 
 with tabs[1]:
     doc_file = st.file_uploader("Upload a DOCX RFP file", type=["docx"])
@@ -179,7 +177,7 @@ with tabs[1]:
         structured_df = extract_structured_roles(text)
 
         if structured_df.empty:
-            keyword = extract_semantic_keyword(text, keywords)
+            keyword = extract_semantic_keyword(text, load_keywords_from_snowflake())
             df_roles = fetch_roles_for_keyword(keyword) if keyword else pd.DataFrame()
         else:
             df_roles = structured_df
@@ -192,14 +190,13 @@ with tabs[1]:
             total = display_estimate(df_roles)
             save_estimation_to_history(project_info.get("Project Title", "Untitled RFP"), total, df_roles, question=text)
 
-
             st.markdown("### 📝 Responses to Proposal Requirements")
             reqs = extract_proposal_requirements(text)
             for req in reqs:
                 st.markdown(f"**• {req}**")
-                match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
+                match = difflib.get_close_matches(req.lower(), load_faq_from_snowflake()["question"].str.lower(), n=1, cutoff=0.4)
                 if match:
-                    answer = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
+                    answer = load_faq_from_snowflake().loc[load_faq_from_snowflake()["question"].str.lower() == match[0], "answer"].values[0]
                     st.markdown(f"✅ {answer}")
                 else:
                     st.markdown("❓ This requirement will be addressed in the proposal.")
@@ -223,4 +220,3 @@ with tabs[2]:
             st.info("No estimation history found.")
     except Exception as e:
         st.warning(f"⚠️ Failed to load estimation history: {e}")
-
