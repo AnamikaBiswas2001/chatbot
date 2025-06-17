@@ -124,19 +124,17 @@ def extract_project_info(text):
         "Location": r"Location:\s*(.*)",
         "Estimated Duration": r"Estimated Duration:\s*(.*)",
         "Start Date": r"Start Date:\s*(.*)",
-        # Scope of Work until next header
-        "Scope of Work": r"Scope of Work:\s*(.*?)(?:Proposal Requirements:|Submission Deadline:|Contact for Clarifications:|$)"
+        "Scope of Work": r"Scope of Work:\s*(.*?)(?:\n[A-Z][a-z ]+:|Proposal Requirements:|Submission Deadline:|Contact for Clarifications:|$)"
     }
 
     for key, pattern in patterns.items():
         match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
         if match:
-            raw = match.group(1).strip()
-            # Remove any line breaks or excessive whitespace
-            cleaned = " ".join(raw.split())
+            cleaned = " ".join(match.group(1).strip().split())
             info[key] = cleaned
 
     return info
+
 
 
 # ----------------- Main App -----------------
