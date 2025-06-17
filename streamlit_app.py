@@ -183,7 +183,7 @@ with tabs[1]:
 with tabs[2]:
     try:
         conn = snowflake.connector.connect(**st.secrets["snowflake"])
-        history_df = pd.read_sql("SELECT project_title, total_cost, role_details_json FROM rfp_estimation_history ORDER BY created_at DESC", conn)
+        history_df = pd.read_sql("SELECT project_title, total_cost, roles FROM rfp_estimation_history ORDER BY created_at DESC", conn)
         if not history_df.empty:
             st.markdown("### 📚 Past Estimations")
             for _, row in history_df.iterrows():
