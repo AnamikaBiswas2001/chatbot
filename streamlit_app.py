@@ -86,7 +86,7 @@ def save_estimation_to_history(project_title, total_cost, df_roles):
         cursor = conn.cursor()
         json_roles = json.dumps(df_roles.to_dict(orient="records"))
         query = f"""
-            INSERT INTO rfp_estimation_history (project_title, total_cost, role_details_json)
+            INSERT INTO rfp_estimation_history (project_title, total_cost, roles)
             VALUES (%s, %s, %s)
         """
         cursor.execute(query, (project_title, float(total_cost), json_roles))
