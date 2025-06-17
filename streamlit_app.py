@@ -5,9 +5,9 @@ from docx import Document
 from io import BytesIO
 import difflib
 import re
+import json
 import uuid
 from datetime import datetime
-import json
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -38,24 +38,28 @@ def load_faq_from_snowflake():
         st.error(f"Failed to load chatbot FAQ: {e}")
         return pd.DataFrame(columns=["question", "answer"])
 
-def save_estimation_history(project_title, keyword, source, df_roles):
+def insert_estimation_history(project_title, keyword, source, roles_df, total_cost):
     try:
         conn = snowflake.connector.connect(**st.secrets["snowflake"])
         cursor = conn.cursor()
-        record = (
-            str(uuid.uuid4()),
-            datetime.now(),
-            project_title,
-            keyword,
-            source,
-            json.dumps(df_roles.to_dict(orient="records")),
-            float(df_roles["total_cost"].sum())
-        )
-        cursor.execute("""
-            INSERT INTO rfp_estimation_history 
-            (id, timestamp, project_title, keyword, source, roles, total_cost)
+
+        roles_json = json.dumps(roles_df.to_dict(orient="records"))
+        insert_query = """
+            INSERT INTO rfp_estimation_history (id, timestamp, project_title, keyword, source, roles, total_cost)
             VALUES (%s, %s, %s, %s, %s, PARSE_JSON(%s), %s)
-        """, record)
+        """
+
+        cursor.execute(insert_query, (
+            str(uuid.uuid4()),
+            datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            project_title or "Untitled",
+            keyword or "Unknown",
+            source,
+            roles_json,
+            total_cost
+        ))
+
+        conn.commit()
         cursor.close()
         conn.close()
     except Exception as e:
@@ -130,118 +134,104 @@ def extract_project_info(text):
 keywords = load_keywords_from_snowflake()
 faq_df = load_faq_from_snowflake()
 
-page = st.sidebar.selectbox("📂 Navigation", ["Assistant", "History"])
+tab1, tab2 = st.tabs(["💬 Chat Query", "📄 Upload DOCX"])
 
-if page == "Assistant":
-    tab1, tab2 = st.tabs(["💬 Chat Query", "📄 Upload DOCX"])
-
-    with tab1:
-        user_input = st.text_input("Enter project-related question or task description:")
-        if user_input:
-            keyword = extract_semantic_keyword(user_input, keywords)
-            if keyword:
-                df_roles = fetch_roles_for_keyword(keyword)
-                if not df_roles.empty:
-                    display_estimate(df_roles)
-                    save_estimation_history("(from chat)", keyword, "chat", df_roles)
-                else:
-                    st.warning("No matching labor roles found.")
-            else:
-                matches = difflib.get_close_matches(user_input.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
-                if matches:
-                    response = faq_df.loc[faq_df["question"].str.lower() == matches[0], "answer"].values[0]
-                    st.markdown(f"**Answer:** {response}")
-                else:
-                    st.warning("Sorry, I couldn't understand that question.")
-
-    with tab2:
-        doc_file = st.file_uploader("Upload a DOCX RFP file", type=["docx"])
-        if doc_file:
-            text = extract_text_from_docx(doc_file)
-            st.text_area("📜 Extracted RFP Text", text, height=250)
-
-            project_info = extract_project_info(text)
-            structured_df = extract_structured_roles(text)
-
-            if structured_df.empty:
-                keyword = extract_semantic_keyword(text, keywords)
-                df_roles = fetch_roles_for_keyword(keyword) if keyword else pd.DataFrame()
-            else:
-                keyword = None
-                df_roles = structured_df
-
+with tab1:
+    user_input = st.text_input("Enter project-related question or task description:")
+    if user_input:
+        keyword = extract_semantic_keyword(user_input, keywords)
+        if keyword:
+            df_roles = fetch_roles_for_keyword(keyword)
             if not df_roles.empty:
-                st.subheader("📋 Project Information")
-                for k, v in project_info.items():
-                    st.markdown(f"**{k}:** {v}")
-
                 display_estimate(df_roles)
+                insert_estimation_history("Chat Estimate", keyword, "chat", df_roles, df_roles["total_cost"].sum())
+            else:
+                st.warning("No matching labor roles found.")
+        else:
+            matches = difflib.get_close_matches(user_input.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
+            if matches:
+                response = faq_df.loc[faq_df["question"].str.lower() == matches[0], "answer"].values[0]
+                st.markdown(f"**Answer:** {response}")
+            else:
+                st.warning("Sorry, I couldn't understand that question.")
 
-                reqs = extract_proposal_requirements(text)
+with tab2:
+    doc_file = st.file_uploader("Upload a DOCX RFP file", type=["docx"])
+    if doc_file:
+        text = extract_text_from_docx(doc_file)
+        st.text_area("📜 Extracted RFP Text", text, height=250)
+
+        project_info = extract_project_info(text)
+        structured_df = extract_structured_roles(text)
+
+        if structured_df.empty:
+            keyword = extract_semantic_keyword(text, keywords)
+            df_roles = fetch_roles_for_keyword(keyword) if keyword else pd.DataFrame()
+        else:
+            df_roles = structured_df
+            keyword = "structured_roles"
+
+        if not df_roles.empty:
+            st.subheader("📋 Project Information")
+            for k, v in project_info.items():
+                st.markdown(f"**{k}:** {v}")
+
+            display_estimate(df_roles)
+            insert_estimation_history(project_info.get("Project Title", "Untitled"), keyword, "document", df_roles, df_roles["total_cost"].sum())
+
+            st.markdown("### 📝 Responses to Proposal Requirements")
+            reqs = extract_proposal_requirements(text)
+            for req in reqs:
+                st.markdown(f"**• {req}**")
+                match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
+                if match:
+                    answer = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
+                    st.markdown(f"✅ {answer}")
+                else:
+                    st.markdown("❓ This requirement will be addressed in the proposal.")
+
+            if st.button("📄 Download Proposal Summary"):
+                doc = Document()
+                doc.add_heading("Proposal Summary", 0)
+
+                for k, v in project_info.items():
+                    doc.add_paragraph(f"{k}: {v}")
+
+                doc.add_heading("Labor Cost Estimation", level=1)
+                table = doc.add_table(rows=1, cols=5)
+                table.style = 'Table Grid'
+                hdrs = ["Role", "Count", "Duration", "Rate", "Total Cost"]
+                for i, h in enumerate(hdrs):
+                    table.rows[0].cells[i].text = h
+                for _, row in df_roles.iterrows():
+                    cells = table.add_row().cells
+                    cells[0].text = row["role"]
+                    cells[1].text = str(row["count"])
+                    cells[2].text = str(row["duration_days"])
+                    cells[3].text = f"${row['daily_rate']}"
+                    cells[4].text = f"${row['total_cost']:,.2f}"
+
+                doc.add_paragraph(f"Estimated Total Labor Cost: ${df_roles['total_cost'].sum():,.2f}")
+
                 if reqs:
-                    st.markdown("### 📝 Responses to Proposal Requirements")
+                    doc.add_heading("Responses to Proposal Requirements", level=1)
                     for req in reqs:
-                        st.markdown(f"**• {req}**")
+                        doc.add_paragraph(f"• {req}")
                         match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
                         if match:
-                            answer = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
-                            st.markdown(f"✅ {answer}")
+                            ans = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
+                            doc.add_paragraph(ans, style='Intense Quote')
                         else:
-                            st.markdown("❓ This requirement will be addressed in the proposal.")
+                            doc.add_paragraph("This requirement will be addressed in the proposal.", style='Intense Quote')
 
-                save_estimation_history(project_info.get("Project Title", "(from document)"), keyword or "structured", "document", df_roles)
-
-                if st.button("📄 Download Proposal Summary"):
-                    doc = Document()
-                    doc.add_heading("Proposal Summary", 0)
-
-                    for k, v in project_info.items():
-                        doc.add_paragraph(f"{k}: {v}")
-
-                    doc.add_heading("Labor Cost Estimation", level=1)
-                    table = doc.add_table(rows=1, cols=5)
-                    table.style = 'Table Grid'
-                    hdrs = ["Role", "Count", "Duration", "Rate", "Total Cost"]
-                    for i, h in enumerate(hdrs):
-                        table.rows[0].cells[i].text = h
-                    for _, row in df_roles.iterrows():
-                        cells = table.add_row().cells
-                        cells[0].text = row["role"]
-                        cells[1].text = str(row["count"])
-                        cells[2].text = str(row["duration_days"])
-                        cells[3].text = f"${row['daily_rate']}"
-                        cells[4].text = f"${row['total_cost']:,.2f}"
-
-                    doc.add_paragraph(f"Estimated Total Labor Cost: ${df_roles['total_cost'].sum():,.2f}")
-
-                    if reqs:
-                        doc.add_heading("Responses to Proposal Requirements", level=1)
-                        for req in reqs:
-                            doc.add_paragraph(f"• {req}")
-                            match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
-                            if match:
-                                ans = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
-                                doc.add_paragraph(ans, style='Intense Quote')
-                            else:
-                                doc.add_paragraph("This requirement will be addressed in the proposal.", style='Intense Quote')
-
-                    buffer = BytesIO()
-                    doc.save(buffer)
-                    buffer.seek(0)
-                    st.download_button(
-                        label="⬇️ Download DOCX Summary",
-                        data=buffer,
-                        file_name="proposal_summary.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
-            else:
-                st.warning("Could not detect any labor roles in the document.")
-
-elif page == "History":
-    st.title("📜 Estimation History")
-    try:
-        conn = snowflake.connector.connect(**st.secrets["snowflake"])
-        df_history = pd.read_sql("SELECT * FROM rfp_estimation_history ORDER BY timestamp DESC", conn)
-        st.dataframe(df_history)
-    except Exception as e:
-        st.error(f"Failed to load history: {e}")
+                buffer = BytesIO()
+                doc.save(buffer)
+                buffer.seek(0)
+                st.download_button(
+                    label="⬇️ Download DOCX Summary",
+                    data=buffer,
+                    file_name="proposal_summary.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+        else:
+            st.warning("Could not detect any labor roles in the document.")
