@@ -191,7 +191,7 @@ with tabs[2]:
             for _, row in history_df.iterrows():
                 st.markdown(f"**Project:** {row['PROJECT_TITLE']} | **Total:** ${row['TOTAL_COST']:,.2f}")
                 with st.expander("View Roles"):
-                    roles_df = pd.DataFrame(json.loads(row["ROLE_DETAILS_JSON"]))
+                    roles_df = pd.DataFrame(json.loads(row["roles"]))
                     st.dataframe(roles_df)
         else:
             st.info("No history found.")
