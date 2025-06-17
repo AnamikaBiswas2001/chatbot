@@ -81,7 +81,7 @@ def fetch_roles_for_keyword(keyword):
         st.error(f"❌ Failed to fetch roles: {e}")
         return pd.DataFrame()
 
-def save_estimation_to_history(project_title, total_cost, df_roles, question=None):
+def save_estimation_to_history(project_title, total_cost, df_roles, question=""):
     try:
         conn = snowflake.connector.connect(**st.secrets["snowflake"])
         cursor = conn.cursor()
@@ -97,6 +97,7 @@ def save_estimation_to_history(project_title, total_cost, df_roles, question=Non
         conn.close()
     except Exception as e:
         st.warning(f"⚠️ Failed to save estimation history: {e}")
+
 
 
 def display_estimate(df):
@@ -212,13 +213,14 @@ with tabs[2]:
         if not history_df.empty:
             st.markdown("### 📚 Past Estimations")
             for _, row in history_df.iterrows():
-                st.markdown(f"**🗂 Project:** {row['PROJECT_TITLE']} | **💬 Query:** `{row['QUESTION'][:100]}`")
-                st.markdown(f"**💰 Total Estimated Cost:** ${row['TOTAL_COST']:,.2f} | 🕒 {row['TIMESTAMP']}")
+                st.markdown(f"**Project:** {row['PROJECT_TITLE']} | **Total Cost:** ${row['TOTAL_COST']:,.2f} | ⏱️ {row['TIMESTAMP']}")
+                if row["QUESTION"]:
+                    st.markdown(f"**💬 Chat Query:** _{row['QUESTION']}_")
                 with st.expander("📋 View Roles"):
                     roles_df = pd.DataFrame(json.loads(row["ROLES"]))
                     st.dataframe(roles_df)
-
         else:
-            st.info("No history found.")
+            st.info("No estimation history found.")
     except Exception as e:
-        st.warning(f"⚠️ Failed to load history: {e}")
+        st.warning(f"⚠️ Failed to load estimation history: {e}")
+
