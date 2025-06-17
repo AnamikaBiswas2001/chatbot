@@ -138,20 +138,11 @@ faq_df = load_faq_from_snowflake()
 tabs = st.tabs(["💬 Chat Query", "📄 Upload DOCX", "📚 Estimation History"])
 current_tab = tabs[0] if st.session_state.last_tab == "💬 Chat Query" else (tabs[1] if st.session_state.last_tab == "📄 Upload DOCX" else tabs[2])
 
-# Use a hidden selectbox with unique key to detect tab change
-selected_tab = st.selectbox(
-    "Select Tab",
-    ["💬 Chat Query", "📄 Upload DOCX", "📚 Estimation History"],
-    index=["💬 Chat Query", "📄 Upload DOCX", "📚 Estimation History"].index(st.session_state.last_tab),
-    key="tab_selector"
-)
-
-# Clear inputs if tab changed
-if st.session_state.last_tab != selected_tab:
+# Clear input if tab changed
+if st.session_state.last_tab != st.selectbox("Select Tab", ["💬 Chat Query", "📄 Upload DOCX", "📚 Estimation History"], index=["💬 Chat Query", "📄 Upload DOCX", "📚 Estimation History"].index(st.session_state.last_tab)):
     st.session_state.user_input = ""
     st.session_state.doc_text = ""
-    st.session_state.chat_history = []
-st.session_state.last_tab = selected_tab
+st.session_state.last_tab = st.selectbox("Select Tab", ["💬 Chat Query", "📄 Upload DOCX", "📚 Estimation History"], index=["💬 Chat Query", "📄 Upload DOCX", "📚 Estimation History"].index(st.session_state.last_tab))
 
 # --- Chat Tab ---
 with tabs[0]:
