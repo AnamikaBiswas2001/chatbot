@@ -6,8 +6,6 @@ from io import BytesIO
 import difflib
 import re
 import json
-import uuid
-from datetime import datetime
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -37,33 +35,6 @@ def load_faq_from_snowflake():
     except Exception as e:
         st.error(f"Failed to load chatbot FAQ: {e}")
         return pd.DataFrame(columns=["question", "answer"])
-
-def insert_estimation_history(project_title, keyword, source, roles_df, total_cost):
-    try:
-        conn = snowflake.connector.connect(**st.secrets["snowflake"])
-        cursor = conn.cursor()
-
-        roles_json = json.dumps(roles_df.to_dict(orient="records"))
-        insert_query = """
-            INSERT INTO rfp_estimation_history (id, timestamp, project_title, keyword, source, roles, total_cost)
-            VALUES (%s, %s, %s, %s, %s, PARSE_JSON(%s), %s)
-        """
-
-        cursor.execute(insert_query, (
-            str(uuid.uuid4()),
-            datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-            project_title or "Untitled",
-            keyword or "Unknown",
-            source,
-            roles_json,
-            total_cost
-        ))
-
-        conn.commit()
-        cursor.close()
-        conn.close()
-    except Exception as e:
-        st.error(f"⚠️ Failed to save estimation history: {e}")
 
 def extract_text_from_docx(file):
     doc = Document(file)
@@ -109,6 +80,20 @@ def fetch_roles_for_keyword(keyword):
         st.error(f"❌ Failed to fetch roles: {e}")
         return pd.DataFrame()
 
+def save_estimation_history(project_title, df_roles):
+    try:
+        conn = snowflake.connector.connect(**st.secrets["snowflake"])
+        cursor = conn.cursor()
+        json_data = json.dumps(df_roles.to_dict(orient="records"))
+        cursor.execute("""
+            INSERT INTO estimation_history (project_title, timestamp, summary_json)
+            VALUES (%s, CURRENT_TIMESTAMP, %s)
+        """, (project_title, json_data))
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        st.warning(f"⚠️ Failed to save estimation history: {e}")
+
 def display_estimate(df):
     st.markdown("### 📊 Estimated Labor Cost")
     st.dataframe(df[["role", "count", "duration_days", "daily_rate", "total_cost"]])
@@ -131,12 +116,26 @@ def extract_project_info(text):
             info[field] = match.group(1).strip()
     return info
 
+def view_history():
+    try:
+        conn = snowflake.connector.connect(**st.secrets["snowflake"])
+        df = pd.read_sql("SELECT * FROM estimation_history ORDER BY timestamp DESC", conn)
+        st.subheader("📜 Estimation History")
+        for _, row in df.iterrows():
+            st.markdown(f"### {row['PROJECT_TITLE']}")
+            st.markdown(f"🕓 {row['TIMESTAMP']}")
+            data = pd.DataFrame(json.loads(row['SUMMARY_JSON']))
+            display_estimate(data)
+            st.markdown("---")
+    except Exception as e:
+        st.error(f"⚠️ Failed to load estimation history: {e}")
+
 keywords = load_keywords_from_snowflake()
 faq_df = load_faq_from_snowflake()
 
-tab1, tab2 = st.tabs(["💬 Chat Query", "📄 Upload DOCX"])
+page = st.sidebar.radio("Navigation", ["Chat", "Upload RFP", "History"])
 
-with tab1:
+if page == "Chat":
     user_input = st.text_input("Enter project-related question or task description:")
     if user_input:
         keyword = extract_semantic_keyword(user_input, keywords)
@@ -144,7 +143,6 @@ with tab1:
             df_roles = fetch_roles_for_keyword(keyword)
             if not df_roles.empty:
                 display_estimate(df_roles)
-                insert_estimation_history("Chat Estimate", keyword, "chat", df_roles, df_roles["total_cost"].sum())
             else:
                 st.warning("No matching labor roles found.")
         else:
@@ -155,7 +153,7 @@ with tab1:
             else:
                 st.warning("Sorry, I couldn't understand that question.")
 
-with tab2:
+elif page == "Upload RFP":
     doc_file = st.file_uploader("Upload a DOCX RFP file", type=["docx"])
     if doc_file:
         text = extract_text_from_docx(doc_file)
@@ -169,7 +167,6 @@ with tab2:
             df_roles = fetch_roles_for_keyword(keyword) if keyword else pd.DataFrame()
         else:
             df_roles = structured_df
-            keyword = "structured_roles"
 
         if not df_roles.empty:
             st.subheader("📋 Project Information")
@@ -177,18 +174,18 @@ with tab2:
                 st.markdown(f"**{k}:** {v}")
 
             display_estimate(df_roles)
-            insert_estimation_history(project_info.get("Project Title", "Untitled"), keyword, "document", df_roles, df_roles["total_cost"].sum())
 
-            st.markdown("### 📝 Responses to Proposal Requirements")
             reqs = extract_proposal_requirements(text)
-            for req in reqs:
-                st.markdown(f"**• {req}**")
-                match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
-                if match:
-                    answer = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
-                    st.markdown(f"✅ {answer}")
-                else:
-                    st.markdown("❓ This requirement will be addressed in the proposal.")
+            if reqs:
+                st.markdown("### 📝 Responses to Proposal Requirements")
+                for req in reqs:
+                    st.markdown(f"**• {req}**")
+                    match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
+                    if match:
+                        answer = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
+                        st.markdown(f"✅ {answer}")
+                    else:
+                        st.markdown("❓ This requirement will be addressed in the proposal.")
 
             if st.button("📄 Download Proposal Summary"):
                 doc = Document()
@@ -233,5 +230,12 @@ with tab2:
                     file_name="proposal_summary.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
+
+            # Save to history
+            save_estimation_history(project_info.get("Project Title", "Untitled Project"), df_roles)
+
         else:
             st.warning("Could not detect any labor roles in the document.")
+
+elif page == "History":
+    view_history()
