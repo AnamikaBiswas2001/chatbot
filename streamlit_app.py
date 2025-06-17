@@ -111,6 +111,7 @@ def extract_proposal_requirements(text):
 def extract_project_info(text):
     info = {
         "Project Title": "",
+        "Project Type": "",
         "Client": "",
         "Location": "",
         "Estimated Duration": "",
@@ -118,22 +119,29 @@ def extract_project_info(text):
         "Scope of Work": ""
     }
 
+    # Extract individual fields
     patterns = {
-        "Project Title": r"Project Title:\s*(.*)",
-        "Client": r"Client:\s*(.*)",
-        "Location": r"Location:\s*(.*)",
-        "Estimated Duration": r"Estimated Duration:\s*(.*)",
-        "Start Date": r"Start Date:\s*(.*)",
-        "Scope of Work": r"Scope of Work:\s*(.*?)(?:\n[A-Z][a-z ]+:|Proposal Requirements:|Submission Deadline:|Contact for Clarifications:|$)"
+        "Project Title": r"Project Title:\s*(.+)",
+        "Project Type": r"Project Type:\s*(.+)",
+        "Client": r"Client:\s*(.+)",
+        "Location": r"Location:\s*(.+)",
+        "Estimated Duration": r"Estimated Duration:\s*(.+)",
+        "Start Date": r"Start Date:\s*(.+)",
     }
 
     for key, pattern in patterns.items():
-        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+        match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            cleaned = " ".join(match.group(1).strip().split())
-            info[key] = cleaned
+            info[key] = match.group(1).strip()
+
+    # Scope of Work with boundary
+    match_scope = re.search(r"Scope of Work:\s*(.*?)(?:Proposal Requirements:|Submission Deadline:|Contact for Clarifications:|$)", text, re.IGNORECASE | re.DOTALL)
+    if match_scope:
+        scope_cleaned = " ".join(match_scope.group(1).strip().split())
+        info["Scope of Work"] = scope_cleaned
 
     return info
+
 
 
 
