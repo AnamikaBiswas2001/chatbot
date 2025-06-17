@@ -8,22 +8,13 @@ import re
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# ----------------- Streamlit Config -----------------
 st.set_page_config(page_title="RFP Chat Assistant", layout="wide")
 st.title("🤖 AI Chat Assistant for RFP Labor Estimation")
 
-# ----------------- Helper Functions -----------------
 @st.cache_data(ttl=600)
 def load_keywords_from_snowflake():
     try:
-        conn = snowflake.connector.connect(
-            user=st.secrets["snowflake"]["user"],
-            password=st.secrets["snowflake"]["password"],
-            account=st.secrets["snowflake"]["account"],
-            warehouse=st.secrets["snowflake"]["warehouse"],
-            database=st.secrets["snowflake"]["database"],
-            schema=st.secrets["snowflake"]["schema"]
-        )
+        conn = snowflake.connector.connect(**st.secrets["snowflake"])
         df = pd.read_sql("SELECT DISTINCT task_keyword FROM standard_task_roles", conn)
         return df["TASK_KEYWORD"].dropna().str.lower().tolist()
     except Exception as e:
@@ -33,14 +24,7 @@ def load_keywords_from_snowflake():
 @st.cache_data(ttl=600)
 def load_faq_from_snowflake():
     try:
-        conn = snowflake.connector.connect(
-            user=st.secrets["snowflake"]["user"],
-            password=st.secrets["snowflake"]["password"],
-            account=st.secrets["snowflake"]["account"],
-            warehouse=st.secrets["snowflake"]["warehouse"],
-            database=st.secrets["snowflake"]["database"],
-            schema=st.secrets["snowflake"]["schema"]
-        )
+        conn = snowflake.connector.connect(**st.secrets["snowflake"])
         cursor = conn.cursor()
         cursor.execute("SELECT question, answer FROM chatbot_faq")
         data = cursor.fetchall()
@@ -55,6 +39,20 @@ def extract_text_from_docx(file):
     doc = Document(file)
     return "\n".join([para.text for para in doc.paragraphs])
 
+def extract_structured_roles(text):
+    pattern = re.compile(r"([A-Za-z ]+?)\s*-\s*Count:\s*(\d+)\s*-\s*Duration:\s*(\d+)\s*Days\s*-\s*Daily Rate:\s*\$(\d+)", re.IGNORECASE)
+    matches = pattern.findall(text)
+    roles = []
+    for role, count, duration, rate in matches:
+        roles.append({
+            "role": role.strip(),
+            "count": int(count),
+            "duration_days": int(duration),
+            "daily_rate": int(rate),
+            "total_cost": int(count) * int(duration) * int(rate)
+        })
+    return pd.DataFrame(roles)
+
 def extract_semantic_keyword(text, keyword_list):
     keyword_list = [kw.lower() for kw in keyword_list]
     corpus = keyword_list + [text.lower()]
@@ -66,16 +64,9 @@ def extract_semantic_keyword(text, keyword_list):
 
 def fetch_roles_for_keyword(keyword):
     try:
-        conn = snowflake.connector.connect(
-            user=st.secrets["snowflake"]["user"],
-            password=st.secrets["snowflake"]["password"],
-            account=st.secrets["snowflake"]["account"],
-            warehouse=st.secrets["snowflake"]["warehouse"],
-            database=st.secrets["snowflake"]["database"],
-            schema=st.secrets["snowflake"]["schema"]
-        )
+        conn = snowflake.connector.connect(**st.secrets["snowflake"])
         query = f"""
-            SELECT role, \"count\", duration_days, daily_rate
+            SELECT role, "count", duration_days, daily_rate
             FROM standard_task_roles
             WHERE LOWER(task_keyword) = '{keyword.lower()}'
         """
@@ -97,98 +88,19 @@ def extract_proposal_requirements(text):
     match = re.search(r"Proposal Requirements:\s*(.*?)\s*(Submission Deadline:|Contact for Clarifications:|$)", text, re.DOTALL | re.IGNORECASE)
     if match:
         raw = match.group(1).strip()
-        lines = [line.strip("-• ").strip() for line in raw.split("\n") if line.strip()]
-        return lines
-    return []
-
-def extract_proposal_requirements(text):
-    match = re.search(r"Proposal Requirements:\s*(.*?)\s*(Submission Deadline:|Contact for Clarifications:|$)", text, re.DOTALL | re.IGNORECASE)
-    if match:
-        raw = match.group(1).strip()
         return [line.strip("-• ").strip() for line in raw.split("\n") if line.strip()]
     return []
 
 def extract_project_info(text):
-    info = {
-        "Project Title": "",
-        "Project Type": "",
-        "Client": "",
-        "Location": "",
-        "Estimated Duration": "",
-        "Start Date": "",
-        "Scope of Work": ""
-    }
-
-    # Extract individual fields
-    patterns = {
-        "Project Title": r"Project Title:\s*(.+)",
-        "Project Type": r"Project Type:\s*(.+)",
-        "Client": r"Client:\s*(.+)",
-        "Location": r"Location:\s*(.+)",
-        "Estimated Duration": r"Estimated Duration:\s*(.+)",
-        "Start Date": r"Start Date:\s*(.+)",
-    }
-
-    for key, pattern in patterns.items():
+    info = {}
+    fields = ["Project Title", "Client", "Location", "Estimated Duration", "Start Date", "Scope of Work"]
+    for field in fields:
+        pattern = rf"{field}:\s*(.*?)(?:\n|$)"
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            info[key] = match.group(1).strip()
-
-    # Scope of Work with boundary
-    match_scope = re.search(r"Scope of Work:\s*(.*?)(?:Proposal Requirements:|Submission Deadline:|Contact for Clarifications:|$)", text, re.IGNORECASE | re.DOTALL)
-    if match_scope:
-        scope_cleaned = " ".join(match_scope.group(1).strip().split())
-        info["Scope of Work"] = scope_cleaned
-
+            info[field] = match.group(1).strip()
     return info
 
-def generate_summary_doc(project_info, roles_df, requirements_responses):
-    doc = Document()
-    doc.add_heading("RFP Proposal Summary", 0)
-
-    # Project Info
-    doc.add_heading("📋 Project Information", level=1)
-    for key, value in project_info.items():
-        if value:
-            doc.add_paragraph(f"{key}: {value}")
-
-    # Labor Estimation Table
-    if not roles_df.empty:
-        doc.add_heading("📊 Estimated Labor Cost", level=1)
-        table = doc.add_table(rows=1, cols=5)
-        table.style = "Table Grid"
-        hdr_cells = table.rows[0].cells
-        headers = ["Role", "Count", "Duration", "Rate", "Total Cost"]
-        for i, h in enumerate(headers):
-            hdr_cells[i].text = h
-        for _, row in roles_df.iterrows():
-            cells = table.add_row().cells
-            cells[0].text = row["role"]
-            cells[1].text = str(row["count"])
-            cells[2].text = str(row["duration_days"])
-            cells[3].text = f"${row['daily_rate']}"
-            cells[4].text = f"${row['total_cost']:,.2f}"
-
-        total = roles_df["total_cost"].sum()
-        doc.add_paragraph(f"\n💰 **Total Estimated Labor Cost**: ${total:,.2f}")
-
-    # Proposal Requirements Responses
-    if requirements_responses:
-        doc.add_heading("📌 Proposal Requirements & Responses", level=1)
-        for req, res in requirements_responses.items():
-            doc.add_paragraph(f"• {req}", style="List Bullet")
-            doc.add_paragraph(res, style="Intense Quote")
-
-    # Prepare for download
-    buffer = BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
-    return buffer
-
-
-
-
-# ----------------- Main App -----------------
 keywords = load_keywords_from_snowflake()
 faq_df = load_faq_from_snowflake()
 
@@ -198,7 +110,6 @@ with tab1:
     user_input = st.text_input("Enter project-related question or task description:")
     if user_input:
         keyword = extract_semantic_keyword(user_input, keywords)
-
         if keyword:
             df_roles = fetch_roles_for_keyword(keyword)
             if not df_roles.empty:
@@ -208,8 +119,7 @@ with tab1:
         else:
             matches = difflib.get_close_matches(user_input.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
             if matches:
-                match = matches[0]
-                response = faq_df.loc[faq_df["question"].str.lower() == match, "answer"].values[0]
+                response = faq_df.loc[faq_df["question"].str.lower() == matches[0], "answer"].values[0]
                 st.markdown(f"**Answer:** {response}")
             else:
                 st.warning("Sorry, I couldn't understand that question.")
@@ -221,47 +131,73 @@ with tab2:
         st.text_area("📜 Extracted RFP Text", text, height=250)
 
         project_info = extract_project_info(text)
+        structured_df = extract_structured_roles(text)
 
-        st.subheader("📋 Project Information")
-        for k, v in project_info.items():
-            if v:
+        if structured_df.empty:
+            keyword = extract_semantic_keyword(text, keywords)
+            df_roles = fetch_roles_for_keyword(keyword) if keyword else pd.DataFrame()
+        else:
+            df_roles = structured_df
+
+        if not df_roles.empty:
+            st.subheader("📋 Project Information")
+            for k, v in project_info.items():
                 st.markdown(f"**{k}:** {v}")
 
+            display_estimate(df_roles)
+            st.markdown("### 📝 Responses to Proposal Requirements")
+            reqs = extract_proposal_requirements(text)
+            for req in reqs:
+                st.markdown(f"**• {req}**")
+                match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
+                if match:
+                    answer = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
+                    st.markdown(f"✅ {answer}")
+                else:
+                    st.markdown("❓ This requirement will be addressed in the proposal.")
 
-        keyword = extract_semantic_keyword(text, keywords)
-                # Only generate download if roles found
-        if keyword:
-            df_roles = fetch_roles_for_keyword(keyword)
-            if not df_roles.empty:
-                display_estimate(df_roles)
+            if st.button("📄 Download Proposal Summary"):
+                doc = Document()
+                doc.add_heading("Proposal Summary", 0)
 
-                # Extract requirements + responses
-                st.markdown("### 📝 Responses to Proposal Requirements")
-                requirements = extract_proposal_requirements(text)
-                requirements_responses = {}
-                for req in requirements:
-                    match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
-                    if match:
-                        answer = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
-                    else:
-                        answer = "This requirement will be addressed in the proposal."
-                    requirements_responses[req] = answer
-                    st.markdown(f"**• {req}**")
-                    st.markdown(answer)
+                for k, v in project_info.items():
+                    doc.add_paragraph(f"{k}: {v}")
 
-                # ⬇️ Generate Download Button
-                st.markdown("---")
-                buffer = generate_summary_doc(project_info, df_roles, requirements_responses)
+                doc.add_heading("Labor Cost Estimation", level=1)
+                table = doc.add_table(rows=1, cols=5)
+                table.style = 'Table Grid'
+                hdrs = ["Role", "Count", "Duration", "Rate", "Total Cost"]
+                for i, h in enumerate(hdrs):
+                    table.rows[0].cells[i].text = h
+                for _, row in df_roles.iterrows():
+                    cells = table.add_row().cells
+                    cells[0].text = row["role"]
+                    cells[1].text = str(row["count"])
+                    cells[2].text = str(row["duration_days"])
+                    cells[3].text = f"${row['daily_rate']}"
+                    cells[4].text = f"${row['total_cost']:,.2f}"
+
+                doc.add_paragraph(f"Estimated Total Labor Cost: ${df_roles['total_cost'].sum():,.2f}")
+
+                if reqs:
+                    doc.add_heading("Responses to Proposal Requirements", level=1)
+                    for req in reqs:
+                        doc.add_paragraph(f"• {req}")
+                        match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
+                        if match:
+                            ans = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
+                            doc.add_paragraph(ans, style='Intense Quote')
+                        else:
+                            doc.add_paragraph("This requirement will be addressed in the proposal.", style='Intense Quote')
+
+                buffer = BytesIO()
+                doc.save(buffer)
+                buffer.seek(0)
                 st.download_button(
-                    label="⬇️ Download Proposal Summary (DOCX)",
+                    label="⬇️ Download DOCX Summary",
                     data=buffer,
                     file_name="proposal_summary.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
-            else:
-                st.warning("No roles found in the database for the detected keyword.")
         else:
-            st.warning("Could not detect project keyword from the document.")
-
-
-    
+            st.warning("Could not detect any labor roles in the document.")
