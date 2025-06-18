@@ -55,6 +55,23 @@ def extract_structured_roles(text):
         })
     return pd.DataFrame(roles)
 
+def save_estimation_to_history(project_title, total_cost, df_roles, question=None):
+    try:
+        conn = snowflake.connector.connect(**st.secrets["snowflake"])
+        cursor = conn.cursor()
+        json_roles = json.dumps(df_roles.to_dict(orient="records"))
+        current_time = datetime.utcnow()
+        query = """
+            INSERT INTO rfp_estimation_history (project_title, total_cost, roles, timestamp, question)
+            VALUES (%s, %s, %s, %s, %s)
+        """
+        cursor.execute(query, (project_title, float(total_cost), json_roles, current_time, question))
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        st.warning(f"⚠️ Failed to save estimation history: {e}")
+
 def extract_semantic_keyword(text, keyword_list):
     keyword_list = [kw.lower() for kw in keyword_list]
     corpus = keyword_list + [text.lower()]
