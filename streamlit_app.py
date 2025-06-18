@@ -173,6 +173,13 @@ with tabs[1]:
                 st.markdown("### 📝 Proposal Requirements")
                 for req in requirements:
                     st.markdown(f"• {req}")
+                    match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
+                    if match:
+                        answer = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
+                        st.markdown(f"✅ {answer}")
+                    else:
+                        st.markdown("❓ This requirement will be addressed in the proposal.")
+
 
             doc = Document()
             doc.add_heading("Proposal Summary", 0)
