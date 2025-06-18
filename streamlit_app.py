@@ -123,6 +123,16 @@ def extract_project_info(text):
             info[field] = match.group(1).strip()
     return info
 
+def find_best_faq_answer(user_query, faq_df, threshold=0.3):
+    vectorizer = TfidfVectorizer().fit(faq_df["question"].tolist() + [user_query])
+    vectors = vectorizer.transform(faq_df["question"].tolist() + [user_query])
+    scores = cosine_similarity(vectors[-1], vectors[:-1]).flatten()
+    best_idx = scores.argmax()
+    if scores[best_idx] >= threshold:
+        return faq_df.iloc[best_idx]["answer"]
+    return None
+
+
 keywords = load_keywords_from_snowflake()
 faq_df = load_faq_from_snowflake()
 
@@ -154,11 +164,15 @@ with tabs[0]:
             else:
                 response = "⚠️ No matching labor roles found in the database."
         else:
-            matches = difflib.get_close_matches(user_input.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
-            if matches:
-                response = faq_df.loc[faq_df["question"].str.lower() == matches[0], "answer"].values[0]
+            response = find_best_faq_answer(user_input, faq_df)
+
+            if response:
+                st.chat_message("assistant").markdown(response)
+                st.session_state.chat_history.append({"role": "user", "text": user_input})
+                st.session_state.chat_history.append({"role": "assistant", "text": response})
             else:
-                response = "❓ Sorry, I couldn't understand that question."
+                st.chat_message("assistant").write("❓ Sorry, I couldn't understand that question.")
+
 
         # Show assistant message
         st.chat_message("assistant").markdown(response)
