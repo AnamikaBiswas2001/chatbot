@@ -168,13 +168,13 @@ with tabs[1]:
             st.dataframe(df_roles)
             st.success(f"💰 Total Estimated Cost: ${total_cost:,.2f}")
 
-            requirements = extract_proposal_requirements(text)
+            requirements = extract_proposal_requirements(text) or []
             if requirements:
                 st.markdown("### 📝 Proposal Requirements")
                 for req in requirements:
                     st.markdown(f"• {req}")
 
-            # ✅ Show download button here
+            # ✅ Always show the download button if roles exist
             if st.button("📄 Download Proposal Summary"):
                 doc = Document()
                 doc.add_heading("Proposal Summary", 0)
@@ -221,6 +221,7 @@ with tabs[1]:
                 )
         else:
             st.warning("❗ Could not detect any labor roles in the document.")
+
 
 
 
