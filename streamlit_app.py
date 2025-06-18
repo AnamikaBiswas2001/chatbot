@@ -98,7 +98,6 @@ def save_estimation_to_history(project_title, total_cost, df_roles, question=Non
     except Exception as e:
         st.warning(f"⚠️ Failed to save estimation history: {e}")
 
-
 def display_estimate(df):
     st.markdown("### 📊 Estimated Labor Cost")
     st.dataframe(df[["role", "count", "duration_days", "daily_rate", "total_cost"]])
@@ -126,28 +125,24 @@ def extract_project_info(text):
 keywords = load_keywords_from_snowflake()
 faq_df = load_faq_from_snowflake()
 
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
 tabs = st.tabs(["💬 Chat Query", "📄 Upload DOCX", "📚 Estimation History"])
 
 with tabs[0]:
     st.subheader("💬 Chat Assistant")
 
-    # Initialize chat history if not present
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-
-    # Show full past chat messages in WhatsApp-style format
     for entry in st.session_state.chat_history:
         with st.chat_message(entry["role"]):
             st.markdown(entry["text"])
 
-    # Input box for new user query
     user_input = st.chat_input("Ask a project-related question or describe your RFP task...")
 
     if user_input:
-        # Show user message
-        st.chat_message("user").write(user_input)
+        with st.chat_message("user"):
+            st.markdown(user_input)
 
-        # Process user query
         keyword = extract_semantic_keyword(user_input, keywords)
         response = ""
 
@@ -155,11 +150,9 @@ with tabs[0]:
             df_roles = fetch_roles_for_keyword(keyword)
             if not df_roles.empty:
                 total = df_roles["total_cost"].sum()
-                response = (
-                    f"### 📊 Estimated Labor Cost\n"
-                    + df_roles[["role", "count", "duration_days", "daily_rate", "total_cost"]].to_markdown(index=False)
-                    + f"\n\n💰 **Total Estimated Cost:** ${total:,.2f}"
-                )
+                response = f"### 📊 Estimated Labor Cost\n"
+                response += df_roles[["role", "count", "duration_days", "daily_rate", "total_cost"]].to_markdown(index=False)
+                response += f"\n\n💰 **Total Estimated Cost:** ${total:,.2f}"
                 save_estimation_to_history("Chat Query", total, df_roles, question=user_input)
             else:
                 response = "⚠️ No matching labor roles found in the database."
@@ -170,14 +163,11 @@ with tabs[0]:
             else:
                 response = "❓ Sorry, I couldn't understand that question."
 
-        # Show assistant message
-        st.chat_message("assistant").markdown(response)
+        with st.chat_message("assistant"):
+            st.markdown(response)
 
-        # Save conversation to chat history (for display & continuity)
         st.session_state.chat_history.append({"role": "user", "text": user_input})
         st.session_state.chat_history.append({"role": "assistant", "text": response})
-
-
 
 with tabs[1]:
     doc_file = st.file_uploader("Upload a DOCX RFP file", type=["docx"])
@@ -201,7 +191,6 @@ with tabs[1]:
 
             total = display_estimate(df_roles)
             save_estimation_to_history(project_info.get("Project Title", "Untitled RFP"), total, df_roles, question=text)
-
 
             st.markdown("### 📝 Responses to Proposal Requirements")
             reqs = extract_proposal_requirements(text)
@@ -232,4 +221,4 @@ with tabs[2]:
         else:
             st.info("No estimation history found.")
     except Exception as e:
-        st.warning(f"⚠️ Failed to load estimation history: {e}")
+        st.warning(f"⚠️ Failed to load history: {e}")
