@@ -173,52 +173,50 @@ with tabs[1]:
                 st.markdown("### 📝 Proposal Requirements")
                 for req in requirements:
                     st.markdown(f"• {req}")
-            st.write("Role data:", df_roles)
-            # ✅ Always show the download button if roles exist
-            if st.button("📄 Download Proposal Summary"):
-                doc = Document()
-                doc.add_heading("Proposal Summary", 0)
 
-                for k, v in project_info.items():
-                    doc.add_paragraph(f"{k}: {v}")
+            doc = Document()
+            doc.add_heading("Proposal Summary", 0)
 
-                doc.add_heading("Labor Cost Estimation", level=1)
-                table = doc.add_table(rows=1, cols=5)
-                table.style = 'Table Grid'
-                headers = ["Role", "Count", "Duration", "Rate", "Total Cost"]
-                for i, h in enumerate(headers):
-                    table.rows[0].cells[i].text = h
-                for _, row in df_roles.iterrows():
-                    cells = table.add_row().cells
-                    cells[0].text = row["role"]
-                    cells[1].text = str(row["count"])
-                    cells[2].text = str(row["duration_days"])
-                    cells[3].text = f"${row['daily_rate']}"
-                    cells[4].text = f"${row['total_cost']:,.2f}"
+            for k, v in project_info.items():
+                doc.add_paragraph(f"{k}: {v}")
 
-                doc.add_paragraph(f"\nEstimated Total Labor Cost: ${total_cost:,.2f}")
+            doc.add_heading("Labor Cost Estimation", level=1)
+            table = doc.add_table(rows=1, cols=5)
+            table.style = 'Table Grid'
+            headers = ["Role", "Count", "Duration", "Rate", "Total Cost"]
+            for i, h in enumerate(headers):
+                table.rows[0].cells[i].text = h
+            for _, row in df_roles.iterrows():
+                cells = table.add_row().cells
+                cells[0].text = row["role"]
+                cells[1].text = str(row["count"])
+                cells[2].text = str(row["duration_days"])
+                cells[3].text = f"${row['daily_rate']}"
+                cells[4].text = f"${row['total_cost']:,.2f}"
 
-                if requirements:
-                    doc.add_heading("Responses to Proposal Requirements", level=1)
-                    for req in requirements:
-                        doc.add_paragraph(f"• {req}")
-                        match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
-                        if match:
-                            answer = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
-                            doc.add_paragraph(answer, style="Intense Quote")
-                        else:
-                            doc.add_paragraph("This requirement will be addressed in the proposal.", style="Intense Quote")
+            doc.add_paragraph(f"\nEstimated Total Labor Cost: ${total_cost:,.2f}")
 
-                buffer = BytesIO()
-                doc.save(buffer)
-                buffer.seek(0)
-                st.write("Role data:", df_roles)
-                st.download_button(
-                    label="⬇️ Download DOCX Summary",
-                    data=buffer,
-                    file_name="proposal_summary.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+            if requirements:
+                doc.add_heading("Responses to Proposal Requirements", level=1)
+                for req in requirements:
+                    doc.add_paragraph(f"• {req}")
+                    match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
+                    if match:
+                        answer = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
+                        doc.add_paragraph(answer, style="Intense Quote")
+                    else:
+                        doc.add_paragraph("This requirement will be addressed in the proposal.", style="Intense Quote")
+
+            buffer = BytesIO()
+            doc.save(buffer)
+            buffer.seek(0)
+
+            st.download_button(
+                label="⬇️ Download DOCX Summary",
+                data=buffer,
+                file_name="proposal_summary.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
         else:
             st.warning("❗ Could not detect any labor roles in the document.")
 
