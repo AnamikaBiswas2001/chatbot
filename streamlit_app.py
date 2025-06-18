@@ -173,7 +173,7 @@ with tabs[1]:
                 st.markdown("### 📝 Proposal Requirements")
                 for req in requirements:
                     st.markdown(f"• {req}")
-
+            st.write("Role data:", df_roles)
             # ✅ Always show the download button if roles exist
             if st.button("📄 Download Proposal Summary"):
                 doc = Document()
@@ -212,7 +212,7 @@ with tabs[1]:
                 buffer = BytesIO()
                 doc.save(buffer)
                 buffer.seek(0)
-
+                st.write("Role data:", df_roles)
                 st.download_button(
                     label="⬇️ Download DOCX Summary",
                     data=buffer,
