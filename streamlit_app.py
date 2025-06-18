@@ -180,10 +180,15 @@ with tabs[1]:
             for k, v in project_info.items():
                 st.markdown(f"**{k}:** {v}")
 
+            
+            
+
             total_cost = df_roles["total_cost"].sum()
             st.markdown("### 📊 Estimated Labor Cost")
             st.dataframe(df_roles)
             st.success(f"💰 Total Estimated Cost: ${total_cost:,.2f}")
+
+            save_estimation_to_history(project_info.get("Project Title", "Untitled RFP"), total_cost, df_roles, question=text)
 
             requirements = extract_proposal_requirements(text) or []
             if requirements:
