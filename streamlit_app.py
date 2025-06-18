@@ -81,31 +81,6 @@ def fetch_roles_for_keyword(keyword):
         st.error(f"❌ Failed to fetch roles: {e}")
         return pd.DataFrame()
 
-def save_estimation_to_history(project_title, total_cost, df_roles, question=None):
-    try:
-        conn = snowflake.connector.connect(**st.secrets["snowflake"])
-        cursor = conn.cursor()
-        json_roles = json.dumps(df_roles.to_dict(orient="records"))
-        current_time = datetime.utcnow()
-        query = """
-            INSERT INTO rfp_estimation_history (project_title, total_cost, roles, timestamp, question)
-            VALUES (%s, %s, %s, %s, %s)
-        """
-        cursor.execute(query, (project_title, float(total_cost), json_roles, current_time, question))
-        conn.commit()
-        cursor.close()
-        conn.close()
-    except Exception as e:
-        st.warning(f"⚠️ Failed to save estimation history: {e}")
-
-
-def display_estimate(df):
-    st.markdown("### 📊 Estimated Labor Cost")
-    st.dataframe(df[["role", "count", "duration_days", "daily_rate", "total_cost"]])
-    total_cost = df["total_cost"].sum()
-    st.success(f"💰 Total Estimated Cost: ${total_cost:,.2f}")
-    return total_cost
-
 def extract_proposal_requirements(text):
     match = re.search(r"Proposal Requirements:\s*(.*?)\s*(Submission Deadline:|Contact for Clarifications:|$)", text, re.DOTALL | re.IGNORECASE)
     if match:
@@ -122,16 +97,6 @@ def extract_project_info(text):
         if match:
             info[field] = match.group(1).strip()
     return info
-
-def find_best_faq_answer(user_query, faq_df, threshold=0.3):
-    vectorizer = TfidfVectorizer().fit(faq_df["question"].tolist() + [user_query])
-    vectors = vectorizer.transform(faq_df["question"].tolist() + [user_query])
-    scores = cosine_similarity(vectors[-1], vectors[:-1]).flatten()
-    best_idx = scores.argmax()
-    if scores[best_idx] >= threshold:
-        return faq_df.iloc[best_idx]["answer"]
-    return None
-
 
 keywords = load_keywords_from_snowflake()
 faq_df = load_faq_from_snowflake()
@@ -202,22 +167,64 @@ with tabs[1]:
             for k, v in project_info.items():
                 st.markdown(f"**{k}:** {v}")
 
-            total = display_estimate(df_roles)
-            save_estimation_to_history(project_info.get("Project Title", "Untitled RFP"), total, df_roles, question=text)
+            total_cost = df_roles["total_cost"].sum()
+            st.markdown("### 📊 Estimated Labor Cost")
+            st.dataframe(df_roles)
+            st.success(f"💰 Total Estimated Cost: ${total_cost:,.2f}")
 
+            requirements = extract_proposal_requirements(text)
+            if requirements:
+                st.markdown("### 📝 Proposal Requirements")
+                for req in requirements:
+                    st.markdown(f"• {req}")
 
-            st.markdown("### 📝 Responses to Proposal Requirements")
-            reqs = extract_proposal_requirements(text)
-            for req in reqs:
-                st.markdown(f"**• {req}**")
-                match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
-                if match:
-                    answer = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
-                    st.markdown(f"✅ {answer}")
-                else:
-                    st.markdown("❓ This requirement will be addressed in the proposal.")
+            if st.button("📄 Download Proposal Summary"):
+                doc = Document()
+                doc.add_heading("Proposal Summary", 0)
+
+                for k, v in project_info.items():
+                    doc.add_paragraph(f"{k}: {v}")
+
+                doc.add_heading("Labor Cost Estimation", level=1)
+                table = doc.add_table(rows=1, cols=5)
+                table.style = 'Table Grid'
+                headers = ["Role", "Count", "Duration", "Rate", "Total Cost"]
+                for i, h in enumerate(headers):
+                    table.rows[0].cells[i].text = h
+                for _, row in df_roles.iterrows():
+                    cells = table.add_row().cells
+                    cells[0].text = row["role"]
+                    cells[1].text = str(row["count"])
+                    cells[2].text = str(row["duration_days"])
+                    cells[3].text = f"${row['daily_rate']}"
+                    cells[4].text = f"${row['total_cost']:,.2f}"
+
+                doc.add_paragraph(f"\nEstimated Total Labor Cost: ${total_cost:,.2f}")
+
+                if requirements:
+                    doc.add_heading("Responses to Proposal Requirements", level=1)
+                    for req in requirements:
+                        doc.add_paragraph(f"• {req}")
+                        match = difflib.get_close_matches(req.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
+                        if match:
+                            answer = faq_df.loc[faq_df["question"].str.lower() == match[0], "answer"].values[0]
+                            doc.add_paragraph(answer, style="Intense Quote")
+                        else:
+                            doc.add_paragraph("This requirement will be addressed in the proposal.", style="Intense Quote")
+
+                buffer = BytesIO()
+                doc.save(buffer)
+                buffer.seek(0)
+
+                st.download_button(
+                    label="⬇️ Download DOCX Summary",
+                    data=buffer,
+                    file_name="proposal_summary.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
         else:
             st.warning("Could not detect any labor roles in the document.")
+
 
 with tabs[2]:
     st.subheader("📚 Estimation History")
