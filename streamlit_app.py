@@ -146,15 +146,11 @@ with tabs[0]:
             else:
                 response = "⚠️ No matching labor roles found in the database."
         else:
-            response = find_best_faq_answer(user_input, faq_df)
-
-            if response:
-                st.chat_message("assistant").markdown(response)
-                st.session_state.chat_history.append({"role": "user", "text": user_input})
-                st.session_state.chat_history.append({"role": "assistant", "text": response})
+            matches = difflib.get_close_matches(user_input.lower(), faq_df["question"].str.lower(), n=1, cutoff=0.4)
+            if matches:
+                response = faq_df.loc[faq_df["question"].str.lower() == matches[0], "answer"].values[0]
             else:
-                st.chat_message("assistant").write("❓ Sorry, I couldn't understand that question.")
-
+                response = "❓ Sorry, I couldn't understand that question."
 
         # Show assistant message
         st.chat_message("assistant").markdown(response)
