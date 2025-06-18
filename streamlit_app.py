@@ -206,19 +206,39 @@ with tabs[1]:
             st.warning("Could not detect any labor roles in the document.")
 
 with tabs[2]:
+    st.subheader("📚 Estimation History")
     try:
         conn = snowflake.connector.connect(**st.secrets["snowflake"])
-        history_df = pd.read_sql("SELECT project_title, total_cost, roles, question, timestamp FROM rfp_estimation_history ORDER BY timestamp DESC", conn)
+        history_df = pd.read_sql(
+            "SELECT project_title, total_cost, roles, question, timestamp FROM rfp_estimation_history ORDER BY timestamp DESC",
+            conn
+        )
+
         if not history_df.empty:
-            st.markdown("### 📚 Past Estimations")
             for _, row in history_df.iterrows():
-                st.markdown(f"**Project:** {row['PROJECT_TITLE']} | **Total Cost:** ${row['TOTAL_COST']:,.2f} | ⏱️ {row['TIMESTAMP']}")
-                if row["QUESTION"]:
-                    st.markdown(f"**💬 Chat Query:** _{row['QUESTION']}_")
-                with st.expander("📋 View Roles"):
-                    roles_df = pd.DataFrame(json.loads(row["ROLES"]))
-                    st.dataframe(roles_df)
+                with st.container():
+                    st.markdown(f"""
+                        <div style="background-color:#f5f5f5; padding:15px; border-radius:10px; margin-bottom:10px">
+                            <strong>📌 Project:</strong> {row['PROJECT_TITLE']}<br>
+                            <strong>💬 Query:</strong> <em>{row['QUESTION'] if row['QUESTION'] else 'N/A'}</em><br>
+                            <strong>💰 Total Cost:</strong> ${row['TOTAL_COST']:,.2f}<br>
+                            <strong>⏱️ Timestamp:</strong> {row['TIMESTAMP']}
+                        </div>
+                    """, unsafe_allow_html=True)
+
+                    with st.expander("📋 View Estimated Roles"):
+                        try:
+                            roles_df = pd.DataFrame(json.loads(row["ROLES"]))
+                            if not roles_df.empty:
+                                roles_df["total_cost"] = roles_df["count"] * roles_df["duration_days"] * roles_df["daily_rate"]
+                                st.dataframe(
+                                    roles_df[["role", "count", "duration_days", "daily_rate", "total_cost"]],
+                                    use_container_width=True
+                                )
+                        except Exception as e:
+                            st.error(f"Error parsing roles data: {e}")
         else:
             st.info("No estimation history found.")
     except Exception as e:
         st.warning(f"⚠️ Failed to load estimation history: {e}")
+
