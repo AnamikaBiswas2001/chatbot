@@ -155,12 +155,8 @@ with tabs[1]:
 
         project_info = extract_project_info(text)
         structured_df = extract_structured_roles(text)
-
-        if structured_df.empty:
-            keyword = extract_semantic_keyword(text, keywords)
-            df_roles = fetch_roles_for_keyword(keyword) if keyword else pd.DataFrame()
-        else:
-            df_roles = structured_df
+        keyword = extract_semantic_keyword(text, keywords)
+        df_roles = structured_df if not structured_df.empty else fetch_roles_for_keyword(keyword) if keyword else pd.DataFrame()
 
         if not df_roles.empty:
             st.subheader("📋 Project Information")
@@ -178,6 +174,7 @@ with tabs[1]:
                 for req in requirements:
                     st.markdown(f"• {req}")
 
+            # ✅ Show download button here
             if st.button("📄 Download Proposal Summary"):
                 doc = Document()
                 doc.add_heading("Proposal Summary", 0)
@@ -223,7 +220,8 @@ with tabs[1]:
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
         else:
-            st.warning("Could not detect any labor roles in the document.")
+            st.warning("❗ Could not detect any labor roles in the document.")
+
 
 
 with tabs[2]:
